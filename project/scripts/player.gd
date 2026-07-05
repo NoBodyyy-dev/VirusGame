@@ -46,7 +46,7 @@ var _emote_tween: Tween
 func _ready() -> void:
 	collision_layer = 1
 	collision_mask = 1 | 4
-	if GameState.selected_class == "worm":
+	if GameState.has_passive("worm"):
 		base_speed *= 1.15
 		sprint_speed *= 1.15
 	base_speed += GameState.evo_bonus("speed")
@@ -64,7 +64,7 @@ func _build_body() -> void:
 	add_child(shape)
 
 	var cls_color: Color = GameState.class_info()["color"]
-	model = VirusModel.create(GameState.selected_class, cls_color, GameState.evolve_stage())
+	model = VirusModel.create(GameState.display_class(), cls_color, GameState.virus_level, GameState.display_secondary())
 	add_child(model)
 
 	var light: = OmniLight3D.new()
@@ -105,7 +105,7 @@ func look_dir() -> Vector3:
 # ── шум: слышит Хантер, растёт тревога ──────────────────────
 
 func _noise(amount: float) -> void:
-	if GameState.selected_class == "rootkit":
+	if GameState.has_passive("rootkit"):
 		return # пассивка: бесшумный
 	Net.send_noise(amount, global_position)
 

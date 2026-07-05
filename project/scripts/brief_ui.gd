@@ -39,7 +39,7 @@ func _ready() -> void:
 	var btn: = UIKit.button("  НАЧАТЬ ВЫНОС ▸  ", 22, UIKit.TEAL)
 	btn.pressed.connect(func() -> void: started.emit())
 	row.add_child(btn)
-	var recon: = "разведка: ПОЛНАЯ (Spyware)" if GameState.recon_full() else "разведка: СТАНДАРТНАЯ — замки сейфов неизвестны"
+	var recon: = "разведка: ПОЛНАЯ (Spyware)" if GameState.recon_full() else "разведка: СТАНДАРТНАЯ — детали задач неизвестны"
 	row.add_child(UIKit.label(recon, 15, UIKit.DIM))
 
 	_rich.visible_characters = 0
@@ -56,38 +56,29 @@ func _compose() -> String:
 	var s: = ""
 	s += "[color=#%s]Задача:[/color] вынести добычу на [color=#%s]◈ %d[/color] в круг у портала. Лут физический: хватай [E], тащи, не роняй!\n" % [
 		dim, teal, cfg["quota"]]
-	s += "[color=#%s]Стражи:[/color] %s · СКАНЕР патрулирует сразу; на 25%% тревоги придут ПОПАПЫ-воришки; на 55%% — HUNTER (он вас СЛЫШИТ); 90%% — СТИРАНИЕ\n" % [dim, cfg["antivirus"]]
+	s += "[color=#%s]Стражи:[/color] %s · сканеров на патруле: %d; на 25%% тревоги придут ПОПАПЫ-воришки; на 55%% — HUNTER (он вас СЛЫШИТ); 90%% — СТИРАНИЕ\n" % [
+		dim, cfg["antivirus"], cfg.get("scanners", 1)]
 	s += "[color=#%s]Тревога сама НЕ падает.[/color] Сброс — только КУЛЕР (3 заряда на команду)\n\n" % amber
-	var i: = 0
-	for safe in cfg["safes"]:
-		i += 1
-		var mg: Dictionary = GameState.MINIGAMES[safe["game"]]
-		var mut_text: = ""
+	s += "[color=#%s]ПОЛЕВЫЕ ЗАДАЧИ (каждая роняет эпик-лут):[/color]\n" % cyan
+	for task in cfg.get("tasks", []):
+		var info: Dictionary = GameState.TASKS[task["type"]]
 		if full:
-			if not safe["mutators"].is_empty():
-				var names: = []
-				for m in safe["mutators"]:
-					names.append(GameState.MUTATORS[m].get_slice(" — ", 0))
-				mut_text = "  [color=#%s][мутатор: %s][/color]" % [amber, ", ".join(names)]
-		elif not safe["mutators"].is_empty():
-			mut_text = "  [color=#%s][??? аномалия замка][/color]" % dim
-		s += "[color=#%s]%s[/color] → %s%s   [color=#%s]внутри: ЭПИК-ЛУТ · реком.: %s[/color]\n" % [
-			cyan, safe["title"], mg["title"], mut_text, dim, mg["best"]]
+			s += "[color=#%s]%s[/color] — %s\n" % [cyan, task["title"], info["desc"]]
+		else:
+			s += "[color=#%s]%s[/color] — %s\n" % [cyan, task["title"], info["desc"].get_slice(":", 0)]
 	s += "\n[color=#%s]ПАМЯТКА СТАИ:[/color]\n" % cyan
 	for line in _hints(cfg, full):
 		s += "  • %s\n" % line
 	return s
 
-func _hints(cfg: Dictionary, full: bool) -> Array:
+func _hints(_cfg: Dictionary, _full: bool) -> Array:
 	var hints: = []
 	hints.append("Тяжёлые ящики несут ВДВОЁМ (Ransomware — один). С грузом нельзя прыгать")
 	hints.append("Уронил с высоты — лут треснул и подешевел. Три удара — РАЗБИТ")
 	hints.append("[F] — швырнуть груз: можно пасовать и добрасывать в круг. Но это шумно")
+	hints.append("СИНХРО-ВЗЛОМ вдвоём — секунды; в одиночку придётся бегать между консолями")
+	hints.append("ЗАХВАТ СЕКТОРА: каждый штамм в зоне ускоряет захват — зовите всех")
 	hints.append("HUNTER слепой: замри — и он пролетит мимо. Бег и прыжки он слышит")
 	hints.append("0 HP = ты БАГ: скачи в круг реанимации или жди дефибриллятор Botnet")
-	if full:
-		for safe in cfg["safes"]:
-			for m in safe["mutators"]:
-				hints.append(GameState.MUTATOR_HINTS[m])
 	hints.append("Квота взята → эвакуация %dс: жадничайте с умом" % int(GameState.EVAC_TIME))
 	return hints

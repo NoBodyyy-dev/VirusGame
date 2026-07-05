@@ -56,10 +56,9 @@ func _ready() -> void:
 	add_child(bottom_left)
 	bw_m = UIKit.meter(300, 22, Color(0.35, 0.6, 1.0), "BANDWIDTH")
 	bottom_left.add_child(bw_m["root"])
-	var info: Dictionary = GameState.class_info()
-	ability_label = UIKit.label("[Q] %s · %d BW" % [info["active"], info["cost"]], 15, UIKit.DIM)
+	ability_label = UIKit.label("", 15, UIKit.DIM)
 	bottom_left.add_child(ability_label)
-	var help_text: = "[E] схватить/бросить · [F] швырнуть · ПРОБЕЛ — прыжок (не с грузом!)"
+	var help_text: = "[E] схватить/бросить/держать у консоли · [F] швырнуть · ПРОБЕЛ — прыжок (не с грузом!)"
 	if Net.active:
 		help_text += "\n[1-4] — эмоции · [G] — подлянка другу (%d BW)" % int(Net.PRANK_COST)
 	var help: = UIKit.label(help_text, 13, UIKit.DIM)
@@ -167,12 +166,19 @@ func _process(delta: float) -> void:
 	bw_m["label"].text = "BANDWIDTH %d" % roundi(GameState.bandwidth)
 
 	_ability_cd = maxf(_ability_cd - delta, 0.0)
-	var info: Dictionary = GameState.class_info()
-	if _ability_cd > 0.0:
-		ability_label.text = "[Q] перезарядка %.1fс" % _ability_cd
+	if GameState.active_abilities.is_empty():
+		ability_label.text = "активок нет — дерево эволюции [Tab] в Гриде"
+		ability_label.add_theme_color_override("font_color", UIKit.DIM)
+	elif _ability_cd > 0.0:
+		ability_label.text = "активки: перезарядка %.1fс" % _ability_cd
 		ability_label.add_theme_color_override("font_color", UIKit.DIM)
 	else:
-		ability_label.text = "[Q] %s · %d BW" % [info["active"], info["cost"]]
+		var keys: = ["Q", "X", "C"]
+		var parts: Array = []
+		for i in GameState.active_abilities.size():
+			var id: String = GameState.active_abilities[i]
+			parts.append("[%s] %s · %d BW" % [keys[i], GameState.ABILITIES[id]["name"], int(GameState.ability_cost(id))])
+		ability_label.text = "   ".join(parts)
 		ability_label.add_theme_color_override("font_color", UIKit.CYAN)
 
 	match GameState.alarm_phase():

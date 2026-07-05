@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="VIRUS — прототип узла"
-config/description="Кооп-хакинг-роглайт: взлом узла Грида. Прототип: 1 узел, 3-4 слоя, бриф, мини-игры, эскалация антивируса."
+config/description="Кооп-хакинг-роглайт: цепочка узлов Грида, дерево эволюции штамма (ветки, уровни 0-3, активки за задания), полевые кооп-задачи, процедурные тематические уровни."
 run/main_scene="res://scenes/main_menu.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 

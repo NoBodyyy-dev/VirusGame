@@ -39,14 +39,14 @@ func show_result(victory: bool, reason: String) -> void:
 
 	v.add_child(UIKit.label("ДОБЫЧА:", 18, UIKit.CYAN))
 	v.add_child(UIKit.label("  Data Fragments: +%d" % loot["data_fragments"], 17))
-	v.add_child(UIKit.label("  Code Samples: +%d  (за чисто вскрытые сейфы)" % loot["code_samples"], 17))
+	v.add_child(UIKit.label("  Code Samples: +%d  (за выполненные полевые задачи)" % loot["code_samples"], 17))
 	v.add_child(UIKit.label("  Mutagen: +%d   ·   Ghost Tokens: +%d" % [loot["mutagen"], loot["ghost_tokens"]], 17))
 	if not victory:
 		v.add_child(UIKit.label("  … большая часть добычи потеряна; тревога Грида выросла", 15, UIKit.MAGENTA))
 
 	var stats: Dictionary = GameState.stats
-	v.add_child(UIKit.label("Твой вклад: ◈ %d за %d ходок · сейфов: %d · разбито: %d · перехватов: %d" % [
-		stats["delivered"], stats["deposits"], stats["safes"], stats["broken"], stats["caught"]], 15, UIKit.DIM))
+	v.add_child(UIKit.label("Твой вклад: ◈ %d за %d ходок · задач: %d · разбито: %d · перехватов: %d" % [
+		stats["delivered"], stats["deposits"], stats["tasks"], stats["broken"], stats["caught"]], 15, UIKit.DIM))
 	v.add_child(UIKit.label("Всего заражено Грида: %d / %d" % [GameState.infected_total(), GameState.total_nodes()], 15, UIKit.TEAL))
 
 	if coop:

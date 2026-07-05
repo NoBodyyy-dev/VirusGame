@@ -2,12 +2,14 @@ class_name VirusModel
 extends Node3D
 
 ## Уникальное процедурное тело для каждого класса вируса.
-## Полиморфный визуал: evolve_stage (0..2) добавляет детали по мере прокачки.
+## Полиморфный визуал: evolve_stage (0..3) добавляет детали по мере прокачки.
+## На УР.3 можно взять доп. ветку — её элементы примешиваются к скину.
 
-var cls: = "worm"
+var cls: = "base"
 var color: = Color(0.2, 0.85, 1.0)
 var move_ratio: = 0.0
 var evolve_stage: = 0
+var secondary: = ""   # доп. ветка: её эмблема добавляется к телу
 
 var _t: = randf() * 10.0
 var _spin: Array = []
@@ -22,11 +24,12 @@ var _stalks: Array = []
 var _popups: Array = []
 var _drill: Node3D
 
-static func create(p_cls: String, p_color: Color, p_stage: = 0) -> VirusModel:
+static func create(p_cls: String, p_color: Color, p_stage: = 0, p_secondary: = "") -> VirusModel:
 	var m: = VirusModel.new()
 	m.cls = p_cls
 	m.color = p_color
 	m.evolve_stage = p_stage
+	m.secondary = p_secondary
 	return m
 
 static func create_bug(p_color: Color) -> Node3D:
@@ -131,7 +134,79 @@ func _ready() -> void:
 		"adware": _build_adware()
 		"rootkit": _build_rootkit()
 		"botnet": _build_botnet()
-		_: _build_worm()
+		_: _build_base()
+	if evolve_stage >= 3:
+		_add_apex_crown()
+	if secondary != "":
+		_add_secondary_emblem(secondary)
+
+# ── БАЗОВЫЙ ПРОТО-ШТАММ: у всех одинаковый на старте ──
+
+func _build_base() -> void:
+	var core_root: = Node3D.new()
+	core_root.position.y = 0.95
+	add_child(core_root)
+	_breath_node = core_root
+	# классический вирион: сфера с рецепторами
+	_sphere(0.42, _holo_mat(color, 1.1), Vector3.ZERO, core_root)
+	_sphere(0.18, _core_mat(color, 3.0), Vector3.ZERO, core_root)
+	_spikes(core_root, 0.4, 10, 0.24, color)
+	# пара наивных глаз — болванка ещё ничего не умеет
+	for side in [-1.0, 1.0]:
+		_sphere(0.08, _core_mat(Color.WHITE.lerp(color, 0.25), 3.5), Vector3(side * 0.16, 0.1, -0.36), core_root)
+	var ring: = _torus(0.52, 0.56, _core_mat(color, 1.2), Vector3.ZERO, core_root)
+	ring.rotation.x = deg_to_rad(70.0)
+	_spin.append({"node": ring, "axis": Vector3(0, 1, 0), "speed": 0.9})
+
+# ── УР.3: венец апекса поверх любого скина ──
+
+func _add_apex_crown() -> void:
+	var crown: = _torus(0.34, 0.4, _core_mat(color.lightened(0.35), 3.2), Vector3(0, 2.25, 0))
+	crown.rotation.x = deg_to_rad(12.0)
+	_spin.append({"node": crown, "axis": Vector3(0, 1, 0), "speed": 2.6})
+	for i in 3:
+		var ang: = TAU * float(i) / 3.0
+		var shard: = _cone(0.05, 0.22, _core_mat(color, 2.6), Vector3(cos(ang) * 0.37, 2.4, sin(ang) * 0.37))
+		shard.rotation.z = -cos(ang) * 0.3
+		shard.rotation.x = sin(ang) * 0.3
+
+# ── доп. ветка: компактная эмблема её силуэта ──
+
+func _add_secondary_emblem(sec: String) -> void:
+	var c2: Color = GameState.CLASSES.get(sec, {}).get("color", color)
+	var pivot: = Node3D.new()
+	pivot.position = Vector3(0, 1.55, 0)
+	add_child(pivot)
+	_orbit.append({"node": pivot, "speed": 1.6, "axis": Vector3(0, 1, 0)})
+	var at: = Vector3(0.62, 0, 0)
+	match sec:
+		"worm":
+			var drill: = _cone(0.09, 0.3, _core_mat(c2, 2.4), at, pivot)
+			drill.rotation.z = deg_to_rad(90.0)
+		"trojan":
+			_box(Vector3(0.2, 0.24, 0.04), _holo_mat(c2, 1.6), at, pivot)
+			_box(Vector3(0.1, 0.03, 0.02), _core_mat(c2, 3.5), at + Vector3(0, 0.04, -0.03), pivot)
+		"ransomware":
+			_torus(0.08, 0.13, _core_mat(c2, 2.2), at, pivot)
+			_box(Vector3(0.12, 0.14, 0.08), _dark_mat(0.85), at + Vector3(0, -0.12, 0), pivot)
+		"spyware":
+			_sphere(0.12, _holo_mat(c2, 1.4), at, pivot)
+			_sphere(0.05, _core_mat(Color(1, 0.3, 0.3), 4.0), at + Vector3(0, 0, -0.1), pivot)
+		"adware":
+			var quad: = QuadMesh.new()
+			quad.size = Vector2(0.26, 0.18)
+			var pm: = StandardMaterial3D.new()
+			pm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			pm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+			pm.cull_mode = BaseMaterial3D.CULL_DISABLED
+			pm.albedo_color = Color(c2.r, c2.g, c2.b, 0.55)
+			_mesh(quad, pm, at, pivot)
+		"rootkit":
+			var hood: = _cone(0.12, 0.24, _holo_mat(c2, 0.9), at, pivot)
+			hood.rotation.x = deg_to_rad(190.0)
+		"botnet":
+			_sphere(0.09, _core_mat(c2, 2.6), at, pivot)
+			_sphere(0.05, _core_mat(c2, 2.6), at + Vector3(0.16, 0.08, 0), pivot)
 
 # ── материалы ──────────────────────────────────────────────
 

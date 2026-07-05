@@ -19,7 +19,7 @@ func _ready() -> void :
  top.add_theme_constant_override("separation", 6)
  add_child(top)
  var info: Dictionary = GameState.class_info()
- class_label = UIKit.label("ШТАММ: %s" % info["name"], 20, info["color"])
+ class_label = UIKit.label("ШТАММ: %s · УР.%d" % [info["name"], GameState.virus_level], 20, info["color"])
  top.add_child(class_label)
  progress_label = UIKit.label("", 18, UIKit.TEAL)
  top.add_child(progress_label)
@@ -66,9 +66,12 @@ func flash_pickup(text: String) -> void :
 
 func refresh() -> void :
  var r: Dictionary = GameState.resources
- res_label.text = "◈ Data %d   ◇ Code %d   ✦ Mutagen %d   ◆ Ghost %d   ⚡ 0-day %d" % [
-  r["data_fragments"], r["code_samples"], r["mutagen"], r["ghost_tokens"], GameState.zero_days]
- progress_label.text = "ЗАРАЖЕНИЕ ГРИДА: %d / %d узлов" % [GameState.infected_total(), GameState.total_nodes()]
+ res_label.text = "◈ Data %d   ◇ Code %d   ✦ Mutagen %d   ◆ Ghost %d" % [
+  r["data_fragments"], r["code_samples"], r["mutagen"], r["ghost_tokens"]]
+ var info: Dictionary = GameState.class_info()
+ class_label.text = "ШТАММ: %s · УР.%d" % [info["name"], GameState.virus_level]
+ class_label.add_theme_color_override("font_color", info["color"])
+ progress_label.text = "ЗАРАЖЕНИЕ ГРИДА: %d / %d узлов (цепочка)" % [GameState.infected_total(), GameState.total_nodes()]
  var heat: = GameState.grid_heat
  if heat > 1.0:
   heat_label.text = "ТРЕВОГА ГРИДА: %d%% — узлы стартуют с повышенным Trace" % roundi(heat)

@@ -2,41 +2,32 @@ extends Node3D
 
 ## PANIC PROTOCOL — узел как ограбление:
 ## тащи физический лут в портал, не буди систему, эвакуируйся до СТИРАНИЯ.
-## Хост владеет: физикой лута, стражами, тревогой, HP, эвакуацией.
+## Уровень генерируется по сиду узла: у каждого тира своя локация.
+## Вместо мини-игр — полевые кооп-задачи (синхро-консоли, захват, реле).
+## Хост владеет: физикой лута, стражами, тревогой, HP, задачами, эвакуацией.
 
-const MG_SCRIPTS: = {
-	"logic_gates": preload("res://scripts/minigames/logic_gates.gd"),
-	"sequence_recall": preload("res://scripts/minigames/sequence_recall.gd"),
-	"freq_lock": preload("res://scripts/minigames/freq_lock.gd"),
-	"pulse_sync": preload("res://scripts/minigames/pulse_sync.gd"),
-	"overload_hold": preload("res://scripts/minigames/overload_hold.gd"),
-	"packet_route": preload("res://scripts/minigames/packet_route.gd"),
-	"cipher_wheel": preload("res://scripts/minigames/cipher_wheel.gd"),
-	"log_wipe": preload("res://scripts/minigames/log_wipe.gd"),
-	"signature_match": preload("res://scripts/minigames/signature_match.gd"),
-	"hash_crack": preload("res://scripts/minigames/hash_crack.gd"),
-	"ring_polarity": preload("res://scripts/minigames/ring_polarity.gd"),
-}
 const HUDScript: = preload("res://scripts/hud.gd")
 const BriefScript: = preload("res://scripts/brief_ui.gd")
 const ResultsScript: = preload("res://scripts/results_ui.gd")
 
-const HALL: = Vector2(70.0, 46.0)
 const PAD_POS: = Vector3(-27.0, 0.0, 0.0)
 const PAD_RADIUS: = 3.6
-const COOLER_POS: = Vector3(-2.0, 0.0, 16.0)
-const SAFE_SPOTS: = [Vector3(15, 0, 12), Vector3(27, 0, -9), Vector3(-23, 0, -13)]
-const CRATE_SPOTS: = [
-	Vector3(25, 0.7, -11), Vector3(19, 0.7, 15), Vector3(-7, 0.7, -17),
-	Vector3(7, 0.7, 18), Vector3(29, 0.7, 5), Vector3(12, 0.7, -18),
-]
 const REVIVE_TIME: = 3.0
 const COOLER_TIME: = 2.6
+const SYNC_CHARGE_TIME: = 2.8    # сек удержания на консоль
+const SYNC_DECAY: = 0.16         # заряд утекает без удержания
+const ZONE_RADIUS: = 4.5
+const ZONE_TIME: = 14.0          # сек захвата в одиночку
+const RELAY_WINDOW: = 12.0       # сек на цепь после первого реле
+
+var hall: = Vector2(70.0, 46.0)
+var rng: = RandomNumberGenerator.new()
+var theme: = "home"
 
 var player: VirusPlayer
 var enemies: = {}            # eid -> Antivirus
 var loots: = {}              # lid -> LootItem
-var safes: Array = []        # HackTerminal
+var tasks_rt: Array = []     # runtime полевых задач
 var portal: Node3D
 var portal_ring_mat: StandardMaterial3D
 var portal_light: OmniLight3D
@@ -44,18 +35,15 @@ var pad_mat: StandardMaterial3D
 var cooler: Node3D
 var cooler_label: Label3D
 var cooler_charges: = 3
+var cooler_pos: = Vector3(-2.0, 0.0, 16.0)
 var env: Environment
 var is_boss: = false
 
 var hud_layer: CanvasLayer
-var mg_layer: CanvasLayer
 var top_layer: CanvasLayer
 var hud: Control
 var pause_panel: Control
 
-var minigame: MinigameBase
-var current_safe: HackTerminal
-var safe_fails: = 0
 var ability_cd: = 0.0
 var phase: = "brief"          # brief / heist / done (эвакуация = evac_open)
 var _paused_by_menu: = false
@@ -67,29 +55,39 @@ var _next_eid: = 0
 # ── кооп и пати ──
 var avatars: = {}
 var party: PartyFx
-var busy_safes: = {}
-var busy_view: Array = []
 var _enemy_sync: = 0.0
 var _loot_sync: = 0.0
+var _task_sync: = 0.0
 var _host_hp: = {}            # id -> hp (владеет хост; для соло — {1: hp})
 var _revive_t: = {}           # id -> прогресс реанимации на паде
 var _cooler_hold: = 0.0
+var _my_hold_idx: = -1        # какую консоль я сейчас держу
+var _my_hold_sub: = -1
 var _demo_timer: = 0.0
 var _demo_grab_cd: = 0.0
+var _plat_spots: Array = []
+var _crate_spots: Array = []
 
 func _ready() -> void:
 	if GameState.node_config.is_empty():
 		if GameState.grid_nodes.is_empty():
-			GameState.new_campaign(GameState.selected_class)
+			GameState.new_campaign()
 		GameState.start_hack(GameState.grid_nodes[0])
 	is_boss = GameState.node_config.get("boss", false)
+	theme = GameState.node_config.get("theme", "home")
+	# сид узла: у всех пиров одинаковая геометрия, у каждого узла — своя
+	rng.seed = int(GameState.node_config.get("seed", 1))
+	hall = Vector2(70.0 + rng.randf_range(0.0, 18.0), 46.0 + rng.randf_range(0.0, 14.0))
+	# позиция кулера выбирается ДО застройки — реквизит его обходит
+	cooler_pos = Vector3(rng.randf_range(-6.0, 10.0), 0.0, rng.randf_range(8.0, hall.y * 0.5 - 5.0))
 	_build_environment()
 	_build_arena()
+	_build_theme_props()
 	_build_platforms()
 	_build_portal_and_pad()
 	_build_cooler()
 	_spawn_player()
-	_spawn_safes()
+	_spawn_task_stations()
 	_build_particles()
 	_build_ui()
 	if Net.active:
@@ -111,11 +109,13 @@ func _host_init() -> void:
 	if Net.active:
 		Net.set_hp(1, GameState.my_max_hp, false)
 	_spawn_loot_table()
-	_spawn_enemy("SCANNER", Vector3(0, 2.3, -9))
-	if is_boss:
-		_spawn_enemy("SCANNER", Vector3(8, 2.3, 9))
+	# защита растёт с тиром: сканеров патрулирует всё больше
+	var scanners: int = GameState.node_config.get("scanners", 1)
+	for i in scanners:
+		var ang: = TAU * float(i) / float(maxi(scanners, 1))
+		_spawn_enemy("SCANNER", Vector3(cos(ang) * 9.0, 2.3, sin(ang) * 7.0))
 
-# ── окружение (стиль сохранён) ──────────────────────────────
+# ── окружение ───────────────────────────────────────────────
 
 func _build_environment() -> void:
 	env = Environment.new()
@@ -132,7 +132,9 @@ func _build_environment() -> void:
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SCREEN
 	env.volumetric_fog_enabled = true
 	env.volumetric_fog_density = 0.022
-	_fog_base = Color(0.55, 0.25, 0.3) if is_boss else Color(0.35, 0.65, 0.8)
+	_fog_base = Color(0.55, 0.25, 0.3) if is_boss else [
+		Color(0.35, 0.65, 0.8), Color(0.7, 0.55, 0.3), Color(0.7, 0.3, 0.45), Color(0.45, 0.3, 0.75),
+	][GameState.node_config.get("difficulty", 0)]
 	env.volumetric_fog_albedo = _fog_base
 	env.volumetric_fog_emission = Color(0.01, 0.03, 0.05)
 	env.volumetric_fog_emission_energy = 0.35
@@ -183,10 +185,24 @@ func _collider(size: Vector3, pos: Vector3) -> void:
 	sb.add_child(cs)
 	add_child(sb)
 
+func _solid_box(size: Vector3, mat: Material, pos: Vector3) -> void:
+	_box(size, mat, pos)
+	_collider(size, pos)
+
+func _spot_free(pos: Vector3, clearance: = 3.5) -> bool:
+	## не застраиваем зону выноса, кулер и дорожку к порталу
+	if pos.distance_to(Vector3(PAD_POS.x, pos.y, PAD_POS.z)) < 8.0:
+		return false
+	if pos.x < -14.0 and absf(pos.z) < 4.0:
+		return false
+	if Vector2(pos.x - cooler_pos.x, pos.z - cooler_pos.z).length() < clearance:
+		return false
+	return true
+
 func _build_arena() -> void:
 	var floor_mesh: = MeshInstance3D.new()
 	var plane: = PlaneMesh.new()
-	plane.size = HALL
+	plane.size = hall
 	floor_mesh.mesh = plane
 	var fmat: = ShaderMaterial.new()
 	fmat.shader = load("res://shaders/floor_grid.gdshader")
@@ -195,18 +211,18 @@ func _build_arena() -> void:
 	fmat.set_shader_parameter("line_col", Vector3(0.9, 0.15, 0.25) if is_boss else tier_cols[tier])
 	floor_mesh.material_override = fmat
 	add_child(floor_mesh)
-	_collider(Vector3(HALL.x, 0.5, HALL.y), Vector3(0, -0.25, 0))
+	_collider(Vector3(hall.x, 0.5, hall.y), Vector3(0, -0.25, 0))
 
 	var wall_mat: = _dark_mat()
 	var trim_color: = Color(0.7, 0.12, 0.2) if is_boss else Color(0.12, 0.55, 0.75)
 	var trim_mat: = _neon_mat(trim_color, 1.1)
-	var hx: = HALL.x * 0.5
-	var hz: = HALL.y * 0.5
+	var hx: = hall.x * 0.5
+	var hz: = hall.y * 0.5
 	for side in [
-		{"size": Vector3(HALL.x, 6, 0.6), "pos": Vector3(0, 3, -hz)},
-		{"size": Vector3(HALL.x, 6, 0.6), "pos": Vector3(0, 3, hz)},
-		{"size": Vector3(0.6, 6, HALL.y), "pos": Vector3(-hx, 3, 0)},
-		{"size": Vector3(0.6, 6, HALL.y), "pos": Vector3(hx, 3, 0)},
+		{"size": Vector3(hall.x, 6, 0.6), "pos": Vector3(0, 3, -hz)},
+		{"size": Vector3(hall.x, 6, 0.6), "pos": Vector3(0, 3, hz)},
+		{"size": Vector3(0.6, 6, hall.y), "pos": Vector3(-hx, 3, 0)},
+		{"size": Vector3(0.6, 6, hall.y), "pos": Vector3(hx, 3, 0)},
 	]:
 		_box(side["size"], wall_mat, side["pos"])
 		_collider(side["size"], side["pos"])
@@ -216,62 +232,178 @@ func _build_arena() -> void:
 		trim_pos.y = 2.6
 		_box(trim_size * Vector3(1.0, 1.0, 1.02), trim_mat, trim_pos)
 
+	# декоративные «свечки» неона
+	for i in 16:
+		var p: = Vector3(rng.randf_range(-hx + 3, hx - 3), 2.6, rng.randf_range(-hz + 3, hz - 3))
+		var c: = Color(0.1, rng.randf_range(0.5, 0.8), rng.randf_range(0.7, 1.0))
+		_box(Vector3(0.05, rng.randf_range(2.5, 5.0), 0.05), _neon_mat(c, rng.randf_range(0.5, 1.1)), p)
+
+# ── тематические локации: каждый тир выглядит по-своему ─────
+
+func _build_theme_props() -> void:
+	if is_boss:
+		_theme_boss()
+		return
+	match theme:
+		"home": _theme_home()
+		"office": _theme_office()
+		"bank": _theme_bank()
+		"dc": _theme_dc()
+
+func _theme_home() -> void:
+	## домашний ПК: гигантские клавиши, планки RAM, башня системника
+	var key_mat: = _dark_mat()
+	var kx: = rng.randf_range(-4.0, 10.0)
+	var kz: = rng.randf_range(-14.0, -4.0)
+	for row in 3:
+		for col in 5:
+			if rng.randf() < 0.25:
+				continue
+			var pos: = Vector3(kx + col * 3.1, 0.8, kz + row * 3.1)
+			if not _spot_free(pos):
+				continue
+			_solid_box(Vector3(2.6, 1.6, 2.6), key_mat, pos)
+			_box(Vector3(2.4, 0.06, 2.4), _neon_mat(Color(0.15, 0.7, 0.9), 0.9), pos + Vector3(0, 0.84, 0))
+	# планки RAM — длинные барьеры
+	for i in 3 + rng.randi() % 3:
+		var pos: = Vector3(rng.randf_range(-16.0, 24.0), 1.4, rng.randf_range(4.0, hall.y * 0.5 - 5.0))
+		if not _spot_free(pos):
+			continue
+		_solid_box(Vector3(7.5, 2.8, 0.9), key_mat, pos)
+		for k in 4:
+			_box(Vector3(0.9, 1.6, 0.1), _neon_mat(Color(0.2, 0.85, 0.5), 1.3), pos + Vector3(-2.6 + k * 1.7, 0.2, 0.51))
+	# башня системника у стены
+	var tower_pos: = Vector3(hall.x * 0.5 - 5.0, 3.0, rng.randf_range(-10.0, 10.0))
+	_solid_box(Vector3(4.5, 6.0, 6.5), key_mat, tower_pos)
+	_box(Vector3(0.4, 0.4, 0.4), _neon_mat(Color(0.2, 0.9, 0.6), 2.5), tower_pos + Vector3(-2.3, 1.8, 2.0))
+
+func _theme_office() -> void:
+	## офис: кубиклы-перегородки и столы с мониторами
+	var desk_mat: = _dark_mat()
+	var part_mat: = _dark_mat()
+	part_mat.albedo_color = Color(0.09, 0.1, 0.13)
+	for row in 2:
+		for col in 3:
+			var base: = Vector3(-10.0 + col * 14.0 + rng.randf_range(-2, 2), 0.0, -12.0 + row * 16.0 + rng.randf_range(-2, 2))
+			if not _spot_free(base, 5.0):
+				continue
+			# П-образная перегородка
+			_solid_box(Vector3(6.0, 2.2, 0.5), part_mat, base + Vector3(0, 1.1, -2.5))
+			_solid_box(Vector3(0.5, 2.2, 5.0), part_mat, base + Vector3(-3.0, 1.1, 0))
+			# стол и монитор
+			_solid_box(Vector3(3.4, 1.0, 1.6), desk_mat, base + Vector3(0.4, 0.5, -1.4))
+			var mon_col: = Color(0.2, 0.7, 0.95) if rng.randf() < 0.5 else Color(0.95, 0.7, 0.25)
+			var mon: = _box(Vector3(1.5, 1.0, 0.12), _neon_mat(mon_col, 1.4), base + Vector3(0.4, 1.6, -1.7))
+			mon.rotation.y = rng.randf_range(-0.3, 0.3)
+	# ксерокс, который все ненавидят
+	var xerox: = Vector3(rng.randf_range(14.0, 24.0), 1.0, rng.randf_range(-6.0, 6.0))
+	if _spot_free(xerox):
+		_solid_box(Vector3(2.2, 2.0, 2.2), desk_mat, xerox)
+		_box(Vector3(1.8, 0.08, 1.8), _neon_mat(Color(0.9, 0.4, 0.2), 1.6), xerox + Vector3(0, 1.06, 0))
+
+func _theme_bank() -> void:
+	## банк: колонны, дверь-сейф, палеты «золотых» блоков
+	var col_mat: = _dark_mat()
+	col_mat.metallic = 0.8
+	for i in 6:
+		var pos: = Vector3(-14.0 + (i % 3) * 14.0, 3.0, -9.0 + float(i / 3) * 18.0)
+		pos.x += rng.randf_range(-1.5, 1.5)
+		if not _spot_free(pos, 4.0):
+			continue
+		_solid_box(Vector3(2.4, 6.0, 2.4), col_mat, pos)
+		_box(Vector3(2.6, 0.3, 2.6), _neon_mat(Color(0.95, 0.75, 0.3), 1.3), pos + Vector3(0, 3.1, 0))
+		_box(Vector3(2.6, 0.3, 2.6), _neon_mat(Color(0.95, 0.75, 0.3), 1.3), pos + Vector3(0, -2.9, 0))
+	# круглая дверь хранилища в дальней стене
+	var vault: = MeshInstance3D.new()
+	var cyl: = CylinderMesh.new()
+	cyl.top_radius = 4.2
+	cyl.bottom_radius = 4.2
+	cyl.height = 1.0
+	vault.mesh = cyl
+	vault.material_override = _neon_mat(Color(0.95, 0.75, 0.3), 0.9)
+	vault.rotation.x = deg_to_rad(90.0)
+	vault.position = Vector3(rng.randf_range(-8.0, 16.0), 4.0, -hall.y * 0.5 + 0.8)
+	add_child(vault)
+	# слитки данных
+	for i in 4 + rng.randi() % 4:
+		var pos: = Vector3(rng.randf_range(-18.0, 26.0), 0.6, rng.randf_range(-hall.y * 0.5 + 6.0, hall.y * 0.5 - 6.0))
+		if not _spot_free(pos):
+			continue
+		_solid_box(Vector3(1.8, 1.2, 1.2), _neon_mat(Color(0.95, 0.8, 0.35), 0.7), pos)
+
+func _theme_dc() -> void:
+	## дата-центр: ровные ряды серверных стоек + кабельные лотки
 	var rack_mat: = _dark_mat()
 	var strip_colors: = [Color(0.15, 0.7, 0.9), Color(0.12, 0.8, 0.6), Color(0.45, 0.3, 0.9)]
-	if is_boss:
-		strip_colors = [Color(0.9, 0.2, 0.3), Color(0.7, 0.15, 0.4)]
-	for rz in [-14.0, -5.0, 5.0, 14.0]:
-		for rx in range(-26, 27, 6):
-			if absf(float(rx)) < 4.0 or randf() < 0.22:
+	var row_gap: = rng.randf_range(7.0, 9.0)
+	var rows: = int(hall.y / row_gap) - 1
+	for r in rows:
+		var rz: = -hall.y * 0.5 + row_gap * float(r + 1)
+		var gap_at: = rng.randi() % 5
+		for c in 6:
+			if c == gap_at:
+				continue # проход в ряду
+			var pos: = Vector3(-18.0 + c * 8.5, 1.5, rz)
+			if not _spot_free(pos):
 				continue
-			var pos: = Vector3(float(rx), 1.3, rz)
-			var skip: = false
-			for spot in SAFE_SPOTS:
-				if pos.distance_to(Vector3(spot.x, 1.3, spot.z)) < 3.5:
-					skip = true
-			if pos.distance_to(Vector3(COOLER_POS.x, 1.3, COOLER_POS.z)) < 3.5:
-				skip = true
-			if pos.distance_to(Vector3(-30, 1.3, 0)) < 6.5 or (pos.x < -14.0 and absf(pos.z) < 4.0):
-				skip = true
-			if skip:
-				continue
-			_box(Vector3(2.4, 2.6, 1.2), rack_mat, pos)
-			_collider(Vector3(2.4, 2.6, 1.2), pos)
-			var sc: Color = strip_colors.pick_random()
-			_box(Vector3(2.3, 0.06, 0.06), _neon_mat(sc, 1.5), pos + Vector3(0, 0.7, 0.64))
-			_box(Vector3(2.3, 0.06, 0.06), _neon_mat(sc * 0.8, 1.1), pos + Vector3(0, -0.4, 0.64))
-			# ящик-ступень рядом с частью стоек — паркур на крышу
-			if randf() < 0.35:
-				var cpos: = pos + Vector3(randf_range(-1.0, 1.0), -0.65, 1.6)
-				_box(Vector3(1.4, 1.3, 1.4), rack_mat, cpos)
-				_collider(Vector3(1.4, 1.3, 1.4), cpos)
+			_solid_box(Vector3(5.0, 3.0, 1.4), rack_mat, pos)
+			var sc: Color = strip_colors[rng.randi() % strip_colors.size()]
+			for k in 3:
+				_box(Vector3(4.6, 0.06, 0.06), _neon_mat(sc, 1.5), pos + Vector3(0, -0.9 + k * 0.8, 0.74))
+		# кабельный лоток над рядом
+		_box(Vector3(44.0, 0.15, 0.8), _neon_mat(Color(0.2, 0.5, 0.7), 0.6), Vector3(0, 4.6, rz))
 
-	for i in 16:
-		var p: = Vector3(randf_range(-hx + 3, hx - 3), 2.6, randf_range(-hz + 3, hz - 3))
-		var c: = Color(0.1, randf_range(0.5, 0.8), randf_range(0.7, 1.0))
-		_box(Vector3(0.05, randf_range(2.5, 5.0), 0.05), _neon_mat(c, randf_range(0.5, 1.1)), p)
-
-var _plat_spots: Array = []
+func _theme_boss() -> void:
+	## ОРАКУЛ: красные колонны-ядра и кольца вычислений
+	var core_mat: = _neon_mat(Color(0.9, 0.2, 0.3), 1.6)
+	for i in 5:
+		var ang: = TAU * float(i) / 5.0
+		var pos: = Vector3(cos(ang) * 14.0, 3.5, sin(ang) * 11.0)
+		if not _spot_free(pos, 4.0):
+			continue
+		_solid_box(Vector3(2.0, 7.0, 2.0), _dark_mat(), pos)
+		_box(Vector3(2.2, 0.4, 2.2), core_mat, pos + Vector3(0, rng.randf_range(-2.0, 2.5), 0))
+	for k in 3:
+		var ring: = MeshInstance3D.new()
+		var tor: = TorusMesh.new()
+		tor.inner_radius = 6.0 + k * 3.0
+		tor.outer_radius = 6.3 + k * 3.0
+		ring.mesh = tor
+		ring.material_override = _neon_mat(Color(0.8, 0.15, 0.25), 0.8)
+		ring.position = Vector3(0, 5.5 + k * 1.2, 0)
+		add_child(ring)
 
 func _build_platforms() -> void:
 	# парящие платформы: наверху лежит лут — прыжки окупаются
 	var plat_mat: = _dark_mat()
 	var glow: = _neon_mat(Color(0.16, 0.95, 0.75) if not is_boss else Color(0.9, 0.25, 0.3), 1.4)
-	var spots: = [
-		{"pos": Vector3(-18, 1.6, -18), "size": Vector3(3.4, 0.35, 3.4)},
-		{"pos": Vector3(-13, 3.0, -20), "size": Vector3(2.8, 0.35, 2.8)},
-		{"pos": Vector3(-7, 4.3, -19), "size": Vector3(2.4, 0.35, 2.4)},
-		{"pos": Vector3(20, 1.7, 16), "size": Vector3(3.2, 0.35, 3.2)},
-		{"pos": Vector3(25, 3.2, 12), "size": Vector3(2.6, 0.35, 2.6)},
-		{"pos": Vector3(6, 1.8, -2), "size": Vector3(2.8, 0.35, 2.8)},
-	]
-	for s in spots:
-		_box(s["size"], plat_mat, s["pos"])
-		_collider(s["size"], s["pos"])
-		var trim: Vector3 = s["size"]
+	var count: = 5 + rng.randi() % 3
+	var placed: Array = []
+	for i in count:
+		var pos: = Vector3(rng.randf_range(-hall.x * 0.5 + 6.0, hall.x * 0.5 - 6.0), rng.randf_range(1.6, 4.3), rng.randf_range(-hall.y * 0.5 + 6.0, hall.y * 0.5 - 6.0))
+		if not _spot_free(pos):
+			continue
+		var ok: = true
+		for prev in placed:
+			if Vector2(pos.x - prev.x, pos.z - prev.z).length() < 6.0:
+				ok = false
+		if not ok:
+			continue
+		placed.append(pos)
+		var size: = Vector3(rng.randf_range(2.4, 3.4), 0.35, rng.randf_range(2.4, 3.4))
+		_box(size, plat_mat, pos)
+		_collider(size, pos)
+		var trim: Vector3 = size
 		trim.y = 0.06
-		_box(trim * Vector3(1.05, 1.0, 1.05), glow, s["pos"] + Vector3(0, s["size"].y * 0.5, 0))
-		_plat_spots.append(s["pos"] + Vector3(0, s["size"].y * 0.5 + 0.6, 0))
+		_box(trim * Vector3(1.05, 1.0, 1.05), glow, pos + Vector3(0, size.y * 0.5, 0))
+		_plat_spots.append(pos + Vector3(0, size.y * 0.5 + 0.6, 0))
+	# точки для тяжёлых ящиков
+	for i in 8:
+		var pos: = Vector3(rng.randf_range(-hall.x * 0.5 + 8.0, hall.x * 0.5 - 6.0), 0.7, rng.randf_range(-hall.y * 0.5 + 6.0, hall.y * 0.5 - 6.0))
+		if _spot_free(pos):
+			_crate_spots.append(pos)
+	if _crate_spots.is_empty():
+		_crate_spots.append(Vector3(12, 0.7, 8))
 
 func _build_portal_and_pad() -> void:
 	portal = Node3D.new()
@@ -332,10 +464,10 @@ func _build_portal_and_pad() -> void:
 
 func _build_cooler() -> void:
 	cooler = Node3D.new()
-	cooler.position = COOLER_POS
+	cooler.position = cooler_pos
 	add_child(cooler)
 	_box(Vector3(1.4, 1.8, 1.0), _dark_mat(), Vector3(0, 0.9, 0), cooler)
-	_collider(Vector3(1.4, 1.8, 1.0), COOLER_POS + Vector3(0, 0.9, 0))
+	_collider(Vector3(1.4, 1.8, 1.0), cooler_pos + Vector3(0, 0.9, 0))
 	var fan: = MeshInstance3D.new()
 	var tm: = TorusMesh.new()
 	tm.inner_radius = 0.28
@@ -366,15 +498,53 @@ func _spawn_player() -> void:
 	player.position = Vector3(-27, 0.2, 3)
 	add_child(player)
 
-func _spawn_safes() -> void:
-	var cfg_safes: Array = GameState.node_config.get("safes", [])
-	for i in cfg_safes.size():
-		var t: = HackTerminal.new()
-		t.setup(cfg_safes[i])
-		t.position = SAFE_SPOTS[i % SAFE_SPOTS.size()]
-		t.rotation.y = randf_range(0.0, TAU)
-		add_child(t)
-		safes.append(t)
+# ── полевые задачи: станции ─────────────────────────────────
+
+func _spawn_task_stations() -> void:
+	var cfg_tasks: Array = GameState.node_config.get("tasks", [])
+	var centers: Array = []
+	for i in cfg_tasks.size():
+		# центр задачи: подальше от портала и других задач
+		var center: = Vector3(12, 0, 0)
+		for attempt in 24:
+			center = Vector3(rng.randf_range(-4.0, hall.x * 0.5 - 9.0), 0.0, rng.randf_range(-hall.y * 0.5 + 8.0, hall.y * 0.5 - 8.0))
+			var ok: = _spot_free(center, 5.0)
+			for prev in centers:
+				if Vector2(center.x - prev.x, center.z - prev.z).length() < 14.0:
+					ok = false
+			if ok:
+				break
+		centers.append(center)
+		var cfg: Dictionary = cfg_tasks[i]
+		var color: = Color("ffb454")
+		var rt: = {"type": cfg["type"], "title": cfg["title"], "done": cfg.get("done", false),
+			"center": center, "stations": [], "p1": 0.0, "p2": 0.0, "step": 0, "timer": 0.0,
+			"holders": {}, "contributors": {}}
+		match cfg["type"]:
+			"sync":
+				var off: = Vector3(rng.randf_range(-1.0, 1.0), 0, rng.randf_range(-1.0, 1.0)).normalized() * 6.5
+				for sub in 2:
+					var st: = TaskStation.create("console", color, "%s\nконсоль %s" % [cfg["title"], ["А", "Б"][sub]])
+					st.position = center + (off if sub == 0 else -off)
+					st.rotation.y = rng.randf_range(0.0, TAU)
+					add_child(st)
+					rt["stations"].append(st)
+			"zone":
+				var st: = TaskStation.create("zone", color, cfg["title"])
+				st.position = center
+				add_child(st)
+				rt["stations"].append(st)
+			"relay":
+				var dir: = Vector3(rng.randf_range(-1.0, 1.0), 0, rng.randf_range(-1.0, 1.0)).normalized()
+				for sub in 3:
+					var st: = TaskStation.create("relay", color, "%s\nреле %d" % [cfg["title"], sub + 1])
+					st.position = center + dir * (float(sub) - 1.0) * 8.0 + Vector3(rng.randf_range(-2, 2), 0, rng.randf_range(-2, 2))
+					add_child(st)
+					rt["stations"].append(st)
+		if rt["done"]:
+			for st in rt["stations"]:
+				st.set_done()
+		tasks_rt.append(rt)
 
 func _build_particles() -> void:
 	var parts: = GPUParticles3D.new()
@@ -383,7 +553,7 @@ func _build_particles() -> void:
 	parts.preprocess = 5.0
 	var pm: = ParticleProcessMaterial.new()
 	pm.emission_shape = ParticleProcessMaterial.EMISSION_SHAPE_BOX
-	pm.emission_box_extents = Vector3(HALL.x * 0.5, 3.5, HALL.y * 0.5)
+	pm.emission_box_extents = Vector3(hall.x * 0.5, 3.5, hall.y * 0.5)
 	pm.direction = Vector3(0, 1, 0)
 	pm.spread = 25.0
 	pm.initial_velocity_min = 0.15
@@ -420,10 +590,6 @@ func _build_ui() -> void:
 	party.toast_request.connect(_on_net_toast)
 	hud_layer.add_child(party)
 
-	mg_layer = CanvasLayer.new()
-	mg_layer.layer = 5
-	add_child(mg_layer)
-
 	top_layer = CanvasLayer.new()
 	top_layer.layer = 10
 	top_layer.process_mode = Node.PROCESS_MODE_ALWAYS
@@ -435,6 +601,8 @@ func _build_ui() -> void:
 	# рентген и кулер работают и в соло — подключаем всегда
 	Net.xray_pulse.connect(_apply_xray)
 	Net.cooler_used.connect(_on_cooler_used)
+	Net.task_state.connect(_on_task_state)
+	Net.task_done.connect(_on_task_done)
 	_update_objective()
 
 func _build_pause_panel() -> Control:
@@ -494,12 +662,20 @@ func _show_brief() -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 		hud.toast("ВЫНОСИМ ВСЁ, ЧТО СВЕТИТСЯ. И ТИХО!", UIKit.TEAL))
 
+func _tasks_done_count() -> int:
+	var c: = 0
+	for rt in tasks_rt:
+		if rt["done"]:
+			c += 1
+	return c
+
 func _update_objective() -> void:
 	if GameState.evac_open:
 		hud.set_objective("ЭВАКУАЦИЯ: все в круг у портала!")
 	else:
-		hud.set_objective("%s (%s) · вынести ◈ на %d%%" % [
-			GameState.node_config["name"], GameState.node_config["tier_short"], 100])
+		hud.set_objective("%s (%s) · вынести ◈ на 100%% · задачи %d/%d" % [
+			GameState.node_config["name"], GameState.node_config["tier_short"],
+			_tasks_done_count(), tasks_rt.size()])
 
 # ── кооп ────────────────────────────────────────────────────
 
@@ -520,10 +696,8 @@ func _setup_coop() -> void:
 	Net.loot_deposited.connect(_on_loot_deposited)
 	Net.enemy_spawned.connect(_on_enemy_spawned)
 	Net.enemies_tf.connect(_on_enemies_tf)
-	Net.safe_state.connect(_on_safe_state)
 	Net.hack_finished.connect(_on_net_finished)
 	Net.net_toast.connect(_on_net_toast)
-	Net.claim_denied.connect(_on_claim_denied)
 	Net.scores_changed.connect(_refresh_scores)
 	if not Net.is_server():
 		Net.srv_hello_hp.rpc_id(1, GameState.my_max_hp)
@@ -558,10 +732,9 @@ func _on_peer_left(id: int) -> void:
 		for it in loots.values():
 			if id in it.carriers:
 				_release_item(it, id, false, Vector3.ZERO)
-		for idx in busy_safes.keys():
-			if busy_safes[idx] == id:
-				busy_safes.erase(idx)
-		_broadcast_safe_state()
+		for rt in tasks_rt:
+			for sub in rt["holders"].keys():
+				rt["holders"][sub].erase(id)
 
 func _on_net_toast(text: String, color: Color) -> void:
 	hud.toast(text, color)
@@ -601,11 +774,11 @@ func _spawn_loot_table() -> void:
 		if i < mini(3, spots.size()):
 			pos = spots[i]
 		else:
-			pos = Vector3(randf_range(-24, 30), 0.7, randf_range(-19, 19))
+			pos = Vector3(randf_range(-24, hall.x * 0.5 - 5.0), 0.7, randf_range(-hall.y * 0.5 + 4.0, hall.y * 0.5 - 4.0))
 			if pos.distance_to(PAD_POS) < 8.0:
 				pos.x = absf(pos.x) # не спавнить прямо у портала
 		items.append(_make_loot_data("file", pos))
-	var cspots: = CRATE_SPOTS.duplicate()
+	var cspots: = _crate_spots.duplicate()
 	cspots.shuffle()
 	for i in crates:
 		items.append(_make_loot_data("crate", cspots[i % cspots.size()] + Vector3(randf_range(-1, 1), 0, randf_range(-1, 1))))
@@ -808,7 +981,7 @@ func _on_loot_dropped_by_enemy(_enemy: Antivirus, it: LootItem) -> void:
 
 func server_noise(amount: float, pos: Vector3, sender: int) -> void:
 	## только хост: шум питает тревогу и слух Хантеров
-	GameState.apply_alarm(amount, "noise", Net.my_class_of(sender) if Net.active else GameState.selected_class)
+	GameState.apply_alarm(amount, "noise", Net.my_class_of(sender) if Net.active else GameState.display_class())
 	for e in enemies.values():
 		if e.enemy_type == "HUNTER" and e.global_position.distance_to(pos) < 32.0:
 			e.hear_noise(pos, amount)
@@ -853,7 +1026,7 @@ func server_cooler(sender: int) -> void:
 	if cooler_charges <= 0:
 		return
 	cooler_charges -= 1
-	GameState.apply_alarm(-15.0, "cooler", Net.my_class_of(sender) if Net.active else GameState.selected_class)
+	GameState.apply_alarm(-15.0, "cooler", Net.my_class_of(sender) if Net.active else GameState.display_class())
 	if Net.active:
 		Net.send_cooler(cooler_charges)
 		Net.toast_all("КУЛЕР: %s сбросил тревогу −15" % Net.player_name(sender), Color(0.3, 0.8, 1.0))
@@ -866,51 +1039,187 @@ func _on_cooler_used(left: int) -> void:
 	_update_cooler_label()
 	Sfx.play("ability", -4.0, 0.7)
 
-# ── хост: сейфы ─────────────────────────────────────────────
+# ── хост: полевые задачи ────────────────────────────────────
 
-func server_claim_safe(idx: int, claim: bool, sender: int) -> void:
-	if claim:
-		if busy_safes.get(idx, sender) != sender:
-			Net.deny_claim(sender, idx)
-			return
-		busy_safes[idx] = sender
-	elif busy_safes.get(idx, 0) == sender:
-		busy_safes.erase(idx)
-	_broadcast_safe_state()
-
-func server_safe_done(idx: int, perfect: bool, sender: int) -> void:
-	var cfg_safes: Array = GameState.node_config["safes"]
-	if idx < 0 or idx >= cfg_safes.size() or cfg_safes[idx]["done"]:
+func server_task_hold(idx: int, sub: int, on: bool, sender: int) -> void:
+	## игрок держит [E] у консоли синхро-взлома
+	if idx < 0 or idx >= tasks_rt.size():
 		return
-	cfg_safes[idx]["done"] = true
-	busy_safes.erase(idx)
-	Net.score_event(sender, "safe")
-	GameState.apply_alarm(4.0, "safe", "worm")
-	# сейф выплёвывает эпик-лут
-	var pos: Vector3 = safes[idx].global_position + Vector3(randf_range(-1.5, 1.5), 1.2, randf_range(-1.5, 1.5))
+	var rt: Dictionary = tasks_rt[idx]
+	if rt["done"] or rt["type"] != "sync":
+		return
+	if not rt["holders"].has(sub):
+		rt["holders"][sub] = {}
+	if on:
+		# проверка дистанции: держать можно только рядом с консолью
+		var actors: = _all_actor_nodes()
+		if actors.has(sender) and sub < rt["stations"].size():
+			var st: TaskStation = rt["stations"][sub]
+			if actors[sender].global_position.distance_to(st.global_position) < 3.4:
+				rt["holders"][sub][sender] = true
+				rt["contributors"][sender] = true
+	else:
+		rt["holders"][sub].erase(sender)
+
+func _task_tick(delta: float) -> void:
+	## только хост: симуляция прогресса задач
+	var actors: = _all_actor_nodes()
+	for i in tasks_rt.size():
+		var rt: Dictionary = tasks_rt[i]
+		if rt["done"]:
+			continue
+		match rt["type"]:
+			"sync":
+				# двойное удержание: обе консоли должны заряжаться одновременно
+				for sub in 2:
+					var held: = false
+					var holders: Dictionary = rt["holders"].get(sub, {})
+					for id in holders.keys():
+						if not actors.has(id):
+							holders.erase(id)
+							continue
+						var st: TaskStation = rt["stations"][sub]
+						if actors[id].global_position.distance_to(st.global_position) < 3.6:
+							held = true
+						else:
+							holders.erase(id)
+					var key: = "p1" if sub == 0 else "p2"
+					if held:
+						rt[key] = minf(rt[key] + delta / SYNC_CHARGE_TIME, 1.0)
+					else:
+						rt[key] = maxf(rt[key] - SYNC_DECAY * delta, 0.0)
+					rt["stations"][sub].set_active(held)
+				if rt["p1"] >= 1.0 and rt["p2"] >= 1.0:
+					_complete_task(i)
+			"zone":
+				var inside: Array = []
+				for id in actors:
+					var bugged: = Net.is_bug(id) if Net.active else GameState.my_bug
+					if bugged:
+						continue
+					if actors[id].global_position.distance_to(rt["center"]) < ZONE_RADIUS:
+						inside.append(id)
+						rt["contributors"][id] = true
+				if inside.size() > 0:
+					rt["p1"] = minf(rt["p1"] + delta * float(inside.size()) / ZONE_TIME, 1.0)
+					# захват шумит — система чувствует вторжение
+					GameState.apply_alarm(0.35 * delta, "capture", "worm")
+				else:
+					rt["p1"] = maxf(rt["p1"] - 0.05 * delta, 0.0)
+				rt["p2"] = float(inside.size())
+				if rt["p1"] >= 1.0:
+					_complete_task(i)
+			"relay":
+				if rt["step"] > 0:
+					rt["timer"] -= delta
+					if rt["timer"] <= 0.0:
+						rt["step"] = 0
+						if Net.active:
+							Net.toast_all("⚡ цепь реле остыла — заново!", UIKit.AMBER)
+						else:
+							hud.toast("⚡ цепь реле остыла — заново!", UIKit.AMBER)
+				var next: int = rt["step"]
+				if next < rt["stations"].size():
+					var st: TaskStation = rt["stations"][next]
+					for id in actors:
+						if actors[id].global_position.distance_to(st.global_position) < 2.4:
+							rt["step"] += 1
+							rt["timer"] = RELAY_WINDOW
+							rt["contributors"][id] = true
+							Sfx.play("chain", -6.0, 1.0 + 0.2 * float(next))
+							break
+				rt["p1"] = float(rt["step"]) / float(rt["stations"].size())
+				if rt["step"] >= rt["stations"].size():
+					_complete_task(i)
+
+func _complete_task(idx: int) -> void:
+	## только хост
+	var rt: Dictionary = tasks_rt[idx]
+	rt["done"] = true
+	var cfg_tasks: Array = GameState.node_config.get("tasks", [])
+	if idx < cfg_tasks.size():
+		cfg_tasks[idx]["done"] = true
+	GameState.apply_alarm(4.0, "task", "worm")
+	var participants: Array = rt["contributors"].keys()
+	for id in participants:
+		if id is int and id > 0:
+			Net.score_event(id, "task")
+	# задача выплёвывает эпик-лут
+	var pos: Vector3 = rt["center"] + Vector3(randf_range(-1.5, 1.5), 1.2, randf_range(-1.5, 1.5))
 	var data: = _make_loot_data("epic", pos)
 	_spawn_loot_local(data, false)
-	var msg: = "💰 %s вскрыл %s — выпал «%s»!" % [Net.player_name(sender), cfg_safes[idx]["title"], data["name"]]
+	var msg: = "💰 %s выполнена — выпал «%s»!" % [rt["title"], data["name"]]
 	if Net.active:
 		Net.send_loot_add(data)
+		Net.send_task_done(idx, participants)
 		Net.toast_all(msg, Color("ffd166"))
 	else:
+		_on_task_done(idx, participants)
 		hud.toast(msg, Color("ffd166"))
-	if perfect:
-		GameState.stats["perfect_safes"] += 0 # локальная стата взломщика начисляется на его пире
-	_broadcast_safe_state()
+	_broadcast_task_state()
 
-func _broadcast_safe_state() -> void:
-	var cfg_safes: Array = GameState.node_config["safes"]
-	var dones: Array = []
-	var busy: Array = []
-	for i in cfg_safes.size():
-		dones.append(cfg_safes[i]["done"])
-		busy.append(busy_safes.get(i, 0))
+func _broadcast_task_state() -> void:
+	var batch: Array = []
+	for i in tasks_rt.size():
+		var rt: Dictionary = tasks_rt[i]
+		batch.append([i, 1.0 if rt["done"] else 0.0, rt["p1"], rt["p2"], rt["step"], rt["timer"]])
 	if Net.active:
-		Net.send_safe_state(dones, busy)
+		Net.send_task_state(batch)
 	else:
-		_on_safe_state(dones, busy)
+		_on_task_state(batch)
+
+func _on_task_state(batch: Array) -> void:
+	## у всех пиров: обновить визуал станций
+	for row in batch:
+		var i: = int(row[0])
+		if i < 0 or i >= tasks_rt.size():
+			continue
+		var rt: Dictionary = tasks_rt[i]
+		if not Net.is_server():
+			rt["done"] = row[1] > 0.5
+			rt["p1"] = row[2]
+			rt["p2"] = row[3]
+			rt["step"] = int(row[4])
+			rt["timer"] = row[5]
+		if rt["done"]:
+			continue
+		match rt["type"]:
+			"sync":
+				rt["stations"][0].set_progress(rt["p1"])
+				rt["stations"][1].set_progress(rt["p2"])
+				rt["stations"][0].set_caption("%s\nконсоль А · %d%%" % [rt["title"], int(rt["p1"] * 100.0)])
+				rt["stations"][1].set_caption("%s\nконсоль Б · %d%%" % [rt["title"], int(rt["p2"] * 100.0)])
+			"zone":
+				rt["stations"][0].set_progress(rt["p1"])
+				rt["stations"][0].set_active(rt["p2"] > 0.0)
+				rt["stations"][0].set_caption("%s\nзахват %d%% · в зоне: %d" % [rt["title"], int(rt["p1"] * 100.0), int(rt["p2"])])
+			"relay":
+				for s in rt["stations"].size():
+					var st: TaskStation = rt["stations"][s]
+					st.set_progress(1.0 if s < rt["step"] else 0.0)
+					st.set_active(s == rt["step"])
+					if s == rt["step"]:
+						var extra: = ""
+						if rt["step"] > 0:
+							extra = " · %.0fс" % maxf(rt["timer"], 0.0)
+						st.set_caption("%s\n▶ реле %d%s" % [rt["title"], s + 1, extra])
+					elif s < rt["step"]:
+						st.set_caption("%s\nреле %d ✓" % [rt["title"], s + 1])
+					else:
+						st.set_caption("%s\nреле %d" % [rt["title"], s + 1])
+
+func _on_task_done(idx: int, participants: Array) -> void:
+	## у всех пиров: задача закрыта
+	if idx < 0 or idx >= tasks_rt.size():
+		return
+	var rt: Dictionary = tasks_rt[idx]
+	rt["done"] = true
+	for st in rt["stations"]:
+		st.set_done()
+	if Net.my_id() in participants:
+		GameState.stats["tasks"] += 1
+	Sfx.play("layer_done")
+	_update_objective()
 
 func apply_enemy_effect(kind: String, arg: float, pos: Vector3) -> void:
 	match kind:
@@ -1022,23 +1331,6 @@ func _on_player_morph(id: int, on: bool) -> void:
 	if id != Net.my_id() and avatars.has(id):
 		avatars[id].set_morph(on)
 
-func _on_safe_state(dones: Array, busy: Array) -> void:
-	busy_view = busy
-	for i in mini(dones.size(), safes.size()):
-		var t: HackTerminal = safes[i]
-		if dones[i]:
-			if not t.done:
-				t.set_done()
-				t.layer["done"] = true
-		else:
-			var holder: int = busy[i] if i < busy.size() else 0
-			t.set_busy_name(Net.player_name(holder) if holder != 0 and holder != Net.my_id() else "")
-
-func _on_claim_denied(idx: int) -> void:
-	if minigame != null and current_safe != null and _safe_index(current_safe) == idx:
-		hud.toast("этот сейф уже ковыряет другой штамм!", UIKit.AMBER)
-		minigame.abort()
-
 func _on_net_finished(victory: bool, reason: String) -> void:
 	_do_local_finish(victory, reason)
 
@@ -1073,6 +1365,13 @@ func _host_tick(delta: float) -> void:
 		for p in range(_phase_seen + 1, ph + 1):
 			_enter_alarm_phase(p)
 		_phase_seen = ph
+
+	# полевые задачи
+	_task_tick(delta)
+	_task_sync -= delta
+	if _task_sync <= 0.0:
+		_task_sync = 0.15
+		_broadcast_task_state()
 
 	# кто-то стоит в круге? депозит и реанимация
 	var actors: = _all_actor_nodes()
@@ -1229,11 +1528,9 @@ func _apply_my_carry() -> void:
 		return
 	var f: = 0.78
 	if it.weight >= 2:
-		f = 0.6 if GameState.selected_class == "ransomware" and it.carriers.size() == 1 else 0.66
-	if GameState.selected_class == "worm":
+		f = 0.6 if GameState.has_passive("ransomware") and it.carriers.size() == 1 else 0.66
+	if GameState.has_passive("worm"):
 		f += 0.08
-	if GameState.mutation_owned("chain_master"):
-		f = 1.0 - (1.0 - f) * 0.5
 	player.carry_factor = f
 
 # ── взаимодействия ──────────────────────────────────────────
@@ -1256,24 +1553,63 @@ func _nearest_free_loot(radius: float) -> LootItem:
 			best = it
 	return best
 
-func _nearest_safe() -> HackTerminal:
-	for t in safes:
-		if t.done:
+func _nearest_sync_console() -> Array:
+	## [task_idx, sub_idx] ближайшей консоли синхро-взлома
+	for i in tasks_rt.size():
+		var rt: Dictionary = tasks_rt[i]
+		if rt["done"] or rt["type"] != "sync":
 			continue
-		if player.global_position.distance_to(t.global_position) < 2.9:
-			return t
-	return null
+		for sub in 2:
+			var st: TaskStation = rt["stations"][sub]
+			if player.global_position.distance_to(st.global_position) < 3.0:
+				return [i, sub]
+	return [-1, -1]
 
-func _safe_index(t: HackTerminal) -> int:
-	return safes.find(t)
+func _nearest_task_hint() -> String:
+	## подсказка возле зоны/реле
+	for rt in tasks_rt:
+		if rt["done"]:
+			continue
+		match rt["type"]:
+			"zone":
+				var d: = player.global_position.distance_to(rt["center"])
+				if d < ZONE_RADIUS:
+					return "ЗАХВАТ ИДЁТ: %d%% — стой в зоне (в зоне: %d)" % [int(rt["p1"] * 100.0), int(rt["p2"])]
+				elif d < ZONE_RADIUS + 4.0:
+					return "%s: встань в кольцо" % rt["title"]
+			"relay":
+				var next: int = rt["step"]
+				if next < rt["stations"].size():
+					var st: TaskStation = rt["stations"][next]
+					if player.global_position.distance_to(st.global_position) < 7.0:
+						return "%s: коснись реле %d" % [rt["title"], next + 1]
+	return ""
+
+func _set_my_hold(idx: int, sub: int) -> void:
+	if _my_hold_idx == idx and _my_hold_sub == sub:
+		return
+	# отпустить старую консоль
+	if _my_hold_idx >= 0:
+		_send_hold(_my_hold_idx, _my_hold_sub, false)
+	_my_hold_idx = idx
+	_my_hold_sub = sub
+	if idx >= 0:
+		_send_hold(idx, sub, true)
+
+func _send_hold(idx: int, sub: int, on: bool) -> void:
+	if Net.active and not Net.is_server():
+		Net.srv_task_hold.rpc_id(1, idx, sub, on)
+	else:
+		server_task_hold(idx, sub, on, Net.my_id())
 
 func _handle_interactions(delta: float) -> void:
-	if minigame != null or phase == "done":
+	if phase == "done":
 		return
 	var prompt: = ""
 	var carried: = my_carried_item()
 
 	if GameState.my_bug:
+		_set_my_hold(-1, -1)
 		var d: = player.global_position.distance_to(PAD_POS)
 		if d < PAD_RADIUS:
 			prompt = "реанимация у портала… держись в круге!"
@@ -1282,6 +1618,20 @@ func _handle_interactions(delta: float) -> void:
 		hud.show_prompt(prompt)
 		return
 
+	# удержание консоли синхро-взлома
+	var sync_at: = _nearest_sync_console()
+	if carried == null and sync_at[0] >= 0 and Input.is_action_pressed("interact"):
+		_set_my_hold(sync_at[0], sync_at[1])
+		var rt: Dictionary = tasks_rt[sync_at[0]]
+		var mine: float = rt["p1"] if sync_at[1] == 0 else rt["p2"]
+		var other: float = rt["p2"] if sync_at[1] == 0 else rt["p1"]
+		prompt = "СИНХРО-ВЗЛОМ: держи [E] · моя консоль %d%% · вторая %d%%" % [int(mine * 100.0), int(other * 100.0)]
+		if other <= 0.01 and (not Net.active or Net.players.size() <= 1):
+			prompt += " (беги заряжать вторую, пока эта не остыла!)"
+		hud.show_prompt(prompt)
+		return
+	_set_my_hold(-1, -1)
+
 	if carried != null:
 		if _carry_strength(carried.carriers) < carried.weight:
 			prompt = "«%s» тяжёлый: нужен второй! [E] бросить" % carried.loot_name
@@ -1289,7 +1639,6 @@ func _handle_interactions(delta: float) -> void:
 			prompt = "неси «%s» в круг у портала · [F] бросить" % carried.loot_name
 	else:
 		var it: = _nearest_free_loot(2.7)
-		var safe: = _nearest_safe()
 		if it != null:
 			if it.weight > 1 and not it.carriers.is_empty():
 				prompt = "[E] подхватить «%s» (вас будет %d/%d)" % [it.loot_name, it.carriers.size() + 1, it.weight]
@@ -1297,14 +1646,9 @@ func _handle_interactions(delta: float) -> void:
 				prompt = "[E] взяться за «%s» — нужно %d носильщика" % [it.loot_name, it.weight]
 			else:
 				prompt = "[E] схватить «%s» (◈ %d)" % [it.loot_name, roundi(it.value)]
-		elif safe != null:
-			var idx: = _safe_index(safe)
-			var holder: = _busy_holder(idx)
-			if holder != 0 and holder != Net.my_id():
-				prompt = "сейф уже ковыряет %s" % Net.player_name(holder)
-			else:
-				prompt = "[E] вскрыть %s → %s" % [safe.layer["title"], GameState.MINIGAMES[safe.layer["game"]]["title"]]
-		elif cooler_charges > 0 and player.global_position.distance_to(COOLER_POS) < 2.8:
+		elif sync_at[0] >= 0:
+			prompt = "[E держать] консоль синхро-взлома (нужны ОБЕ консоли сразу)"
+		elif cooler_charges > 0 and player.global_position.distance_to(cooler_pos) < 2.8:
 			if Input.is_action_pressed("interact"):
 				_cooler_hold += delta
 				prompt = "охлаждение… %d%%" % int(_cooler_hold / COOLER_TIME * 100.0)
@@ -1314,6 +1658,8 @@ func _handle_interactions(delta: float) -> void:
 			else:
 				_cooler_hold = 0.0
 				prompt = "[E держать] КУЛЕР: тревога −15 (зарядов: %d)" % cooler_charges
+		else:
+			prompt = _nearest_task_hint()
 
 	if prompt == "":
 		hud.hide_prompt()
@@ -1327,21 +1673,9 @@ func _handle_interactions(delta: float) -> void:
 			var it: = _nearest_free_loot(2.7)
 			if it != null:
 				_request_grab(it)
-			else:
-				var safe: = _nearest_safe()
-				if safe != null:
-					var idx: = _safe_index(safe)
-					var holder: = _busy_holder(idx)
-					if holder == 0 or holder == Net.my_id():
-						_open_safe(safe)
 
 func _my_strength() -> int:
-	return 2 if GameState.selected_class == "ransomware" else 1
-
-func _busy_holder(idx: int) -> int:
-	if idx >= 0 and idx < busy_view.size():
-		return busy_view[idx]
-	return 0
+	return 2 if GameState.has_passive("ransomware") else 1
 
 func _request_grab(it: LootItem) -> void:
 	player._unmorph_if_needed()
@@ -1371,122 +1705,65 @@ func _unhandled_input(event: InputEvent) -> void:
 	if phase == "brief" or phase == "done":
 		return
 	if event.is_action_pressed("pause"):
-		if minigame != null:
-			minigame.abort()
-		else:
-			_toggle_pause()
-	elif event.is_action_pressed("ability") and not _paused_by_menu and minigame == null:
-		_use_ability()
-	elif event.is_action_pressed("throw") and minigame == null and not _paused_by_menu:
+		_toggle_pause()
+	elif event.is_action_pressed("ability") and not _paused_by_menu:
+		_use_ability(0)
+	elif event.is_action_pressed("ability_2") and not _paused_by_menu:
+		_use_ability(1)
+	elif event.is_action_pressed("ability_3") and not _paused_by_menu:
+		_use_ability(2)
+	elif event.is_action_pressed("throw") and not _paused_by_menu:
 		var it: = my_carried_item()
 		if it != null and _carry_strength(it.carriers) >= it.weight:
 			_request_release(it, true)
-	elif event.is_action_pressed("zeroday") and minigame != null:
-		if GameState.use_zero_day():
-			Sfx.play("chain", 0.0, 0.8)
-			minigame.force_layer_success()
-		else:
-			hud.toast("нет 0-day эксплойтов — крафт в Гриде [Tab]", UIKit.DIM)
 
 func _toggle_pause() -> void:
 	_paused_by_menu = not _paused_by_menu
 	if Net.active:
-		if minigame == null:
-			player.control_enabled = not _paused_by_menu
+		player.control_enabled = not _paused_by_menu
 	else:
 		get_tree().paused = _paused_by_menu
 	pause_panel.visible = _paused_by_menu
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if (_paused_by_menu or minigame != null) else Input.MOUSE_MODE_CAPTURED
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if _paused_by_menu else Input.MOUSE_MODE_CAPTURED
 
-# ── сейфы (мини-игры) ───────────────────────────────────────
+# ── активки: до 3 слотов [Q]/[X]/[C] ────────────────────────
 
-func _open_safe(safe: HackTerminal) -> void:
-	current_safe = safe
-	safe_fails = 0
-	var idx: = _safe_index(safe)
-	if Net.active:
-		if Net.is_server():
-			server_claim_safe(idx, true, 1)
-		else:
-			Net.srv_claim_safe.rpc_id(1, idx, true)
-	var script: GDScript = MG_SCRIPTS[safe.layer["game"]]
-	minigame = script.new()
-	var diff: int = GameState.node_config.get("difficulty", 1)
-	minigame.setup(safe.layer, diff)
-	minigame.round_result.connect(_on_round_result)
-	minigame.finished.connect(_on_minigame_finished)
-	mg_layer.add_child(minigame)
-	player.control_enabled = false
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-
-func _on_round_result(success: bool) -> void:
-	if not success:
-		safe_fails += 1
-		var spike: = randf_range(7.0, 11.0)
-		GameState.add_alarm(spike, "fail")
-		Net.send_noise(2.0, player.global_position)
-		player.shake(0.25)
-
-func _on_minigame_finished(success: bool) -> void:
-	var safe: = current_safe
-	current_safe = null
-	if minigame != null:
-		minigame.queue_free()
-		minigame = null
-	player.control_enabled = true
-	if not _paused_by_menu and phase != "done":
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	if safe == null:
-		return
-	var idx: = _safe_index(safe)
-	if success:
-		GameState.stats["safes"] += 1
-		if safe_fails == 0:
-			GameState.stats["perfect_safes"] += 1
-		if Net.active and not Net.is_server():
-			Net.srv_safe_done.rpc_id(1, idx, safe_fails == 0)
-		else:
-			server_safe_done(idx, safe_fails == 0, Net.my_id())
-	else:
-		if Net.active and not Net.is_server():
-			Net.srv_claim_safe.rpc_id(1, idx, false)
-		else:
-			server_claim_safe(idx, false, Net.my_id())
-
-# ── активки ─────────────────────────────────────────────────
-
-func _use_ability() -> void:
+func _use_ability(slot: int) -> void:
 	if GameState.my_bug:
 		hud.toast("ты баг. у багов нет активок. у багов есть только писк", UIKit.DIM)
+		return
+	if slot >= GameState.active_abilities.size():
+		if GameState.active_abilities.is_empty():
+			hud.toast("нет активок: выбери ветку и УР.1 в дереве эволюции [Tab] (в Гриде)", UIKit.DIM)
 		return
 	if ability_cd > 0.0:
 		hud.toast("активка перезаряжается", UIKit.DIM)
 		return
-	var cls: = GameState.selected_class
-	var info: Dictionary = GameState.class_info()
-	if not GameState.try_spend_bw(float(info["cost"])):
+	var id: String = GameState.active_abilities[slot]
+	var cost: = GameState.ability_cost(id)
+	if not GameState.try_spend_bw(cost):
 		hud.toast("недостаточно Bandwidth", UIKit.MAGENTA)
 		return
 	Sfx.play("ability")
 	var remote_client: = Net.active and not Net.is_server()
-	match cls:
-		"trojan":
+	match id:
+		"morph":
 			player.set_morph(true)
 			Net.send_morph(true)
 			hud.toast("ЛОЖНЫЙ ФАЙЛ: замри — и ты мебель. Движение снимает морф", UIKit.CYAN)
-		"worm":
+		"dash":
 			player.dash()
 			hud.toast("РЫВОК!", UIKit.TEAL)
-		"ransomware":
+		"freeze":
 			if remote_client:
 				Net.srv_enemy_effect.rpc_id(1, "freeze", 3.0, Vector3.ZERO)
 			else:
 				apply_enemy_effect("freeze", 3.0, Vector3.ZERO)
 			hud.toast("ШИФРОВАНИЕ: все стражи заморожены (3с)", UIKit.MAGENTA)
-		"spyware":
+		"xray":
 			Net.send_xray()
 			hud.toast("СКАН: лут и стражи подсвечены всей команде (6с)", UIKit.AMBER)
-		"adware":
+		"decoy":
 			var pos: = player.global_position + player.look_dir() * 4.0
 			if remote_client:
 				Net.srv_enemy_effect.rpc_id(1, "decoy", 5.0, Vector3(pos.x, 2.3, pos.z))
@@ -1494,10 +1771,10 @@ func _use_ability() -> void:
 				apply_enemy_effect("decoy", 5.0, Vector3(pos.x, 2.3, pos.z))
 			_spawn_decoy_ghost(pos)
 			hud.toast("ФАНТОМ: стражи ведутся (5с)", UIKit.AMBER)
-		"rootkit":
+		"jam":
 			GameState.add_alarm(-12.0, "wipe")
 			hud.toast("ГЛУШИЛКА: тревога −12", UIKit.VIOLET)
-		"botnet":
+		"heal":
 			var target: = _nearest_bug(6.0)
 			if target != 0:
 				if remote_client:
@@ -1604,8 +1881,6 @@ func _do_local_finish(victory: bool, reason: String) -> void:
 	_dlog("ФИНИШ victory=%s (%s) добыча=%d%%" % [victory, reason, roundi(GameState.access)])
 	GameState.finish_hack(victory)
 	Sfx.play("hack_win" if victory else "hack_fail")
-	if minigame != null:
-		minigame.abort()
 	get_tree().paused = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	var results: Control = ResultsScript.new()

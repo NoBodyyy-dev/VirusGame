@@ -17,12 +17,17 @@ var _crate_model: Node3D
 var is_bug: = false
 var morph_hidden: = false
 
+var _lvl: = 0
+var _cls2: = ""
+
 func setup(p_id: int, p_cls: String, p_name: String) -> void:
 	peer_id = p_id
 	cls = p_cls
+	_lvl = Net.my_level_of(p_id)
+	_cls2 = Net.my_second_of(p_id)
 	name = "Remote%d" % p_id
 	var color: Color = GameState.CLASSES[p_cls]["color"]
-	model = VirusModel.create(p_cls, color)
+	model = VirusModel.create(p_cls, color, _lvl, _cls2)
 	add_child(model)
 	var light: = OmniLight3D.new()
 	light.light_color = color
@@ -31,7 +36,7 @@ func setup(p_id: int, p_cls: String, p_name: String) -> void:
 	light.position.y = 1.2
 	add_child(light)
 	name_label = Label3D.new()
-	name_label.text = "%s · %s" % [p_name, GameState.CLASSES[p_cls]["name"]]
+	name_label.text = "%s · %s · ур.%d" % [p_name, GameState.CLASSES[p_cls]["name"], _lvl]
 	name_label.font_size = 36
 	name_label.modulate = color
 	name_label.outline_size = 8
@@ -39,6 +44,28 @@ func setup(p_id: int, p_cls: String, p_name: String) -> void:
 	name_label.no_depth_test = true
 	name_label.position.y = 2.4
 	add_child(name_label)
+	Net.players_changed.connect(refresh_identity)
+
+func refresh_identity() -> void:
+	## игрок прокачался в дереве — пересобрать его скин
+	if not Net.players.has(peer_id):
+		return
+	var n_cls: = Net.my_class_of(peer_id)
+	var n_lvl: = Net.my_level_of(peer_id)
+	var n_cls2: = Net.my_second_of(peer_id)
+	if n_cls == cls and n_lvl == _lvl and n_cls2 == _cls2:
+		return
+	cls = n_cls
+	_lvl = n_lvl
+	_cls2 = n_cls2
+	var color: Color = GameState.CLASSES[cls]["color"]
+	if model:
+		model.queue_free()
+	model = VirusModel.create(cls, color, _lvl, _cls2)
+	add_child(model)
+	if name_label and not is_bug:
+		name_label.text = "%s · %s · ур.%d" % [Net.player_name(peer_id), GameState.CLASSES[cls]["name"], _lvl]
+		name_label.modulate = color
 
 func net_update(pos: Vector3, yaw: float, ratio: float) -> void:
 	target_pos = pos

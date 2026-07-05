@@ -22,13 +22,14 @@ signal cooler_used(left: int)
 signal enemy_spawned(id: int, type: String, pos: Vector3)
 signal enemies_tf(batch: Array)
 signal enemy_fx(id: int, kind: String)
-signal safe_state(dones: Array, busy: Array)
+signal task_state(batch: Array)
+signal task_done(idx: int, participants: Array)
 signal net_toast(text: String, color: Color)
 signal peer_left(id: int)
 signal emote_shown(id: int, idx: int)
 signal prank_applied(from_id: int, target_id: int, kind: String)
 signal scores_changed
-signal claim_denied(idx: int)
+signal enter_fx(node_id: int)
 signal xray_pulse
 
 const PORT: = 24565
@@ -85,27 +86,38 @@ func player_color(id: int) -> Color:
 	return GameState.CLASSES.get(my_class_of(id), {}).get("color", Color.WHITE)
 
 func my_class_of(id: int) -> String:
+	## отображаемый класс: "base", пока не взят УР.1 ветки
 	if not active and id == 1:
-		return GameState.selected_class
-	return players.get(id, {}).get("cls", "worm")
+		return GameState.display_class()
+	return players.get(id, {}).get("cls", "base")
+
+func my_level_of(id: int) -> int:
+	if not active and id == 1:
+		return GameState.virus_level
+	return players.get(id, {}).get("lvl", 0)
+
+func my_second_of(id: int) -> String:
+	if not active and id == 1:
+		return GameState.display_secondary()
+	return players.get(id, {}).get("cls2", "")
 
 # ── лобби ───────────────────────────────────────────────────
 
-func host_game(cls: String, nick: String) -> bool:
+func host_game(nick: String) -> bool:
 	var peer: = ENetMultiplayerPeer.new()
 	if peer.create_server(PORT, MAX_CLIENTS) != OK:
 		lobby_status.emit("не удалось открыть порт %d" % PORT)
 		return false
 	multiplayer.multiplayer_peer = peer
 	active = true
-	players = {1: {"cls": cls, "name": nick if nick != "" else "ХОСТ"}}
+	players = {1: {"cls": "base", "name": nick if nick != "" else "ХОСТ", "lvl": 0, "cls2": ""}}
 	multiplayer.peer_connected.connect(_on_peer_connected)
 	multiplayer.peer_disconnected.connect(_on_peer_disconnected)
 	players_changed.emit()
 	lobby_status.emit("лобби открыто · порт %d · ждём штаммы (до 8)…" % PORT)
 	return true
 
-func join_game(ip: String, cls: String, nick: String) -> bool:
+func join_game(ip: String, nick: String) -> bool:
 	var peer: = ENetMultiplayerPeer.new()
 	if peer.create_client(ip if ip != "" else "127.0.0.1", PORT) != OK:
 		lobby_status.emit("не удалось подключиться")
@@ -114,7 +126,7 @@ func join_game(ip: String, cls: String, nick: String) -> bool:
 	active = true
 	players = {}
 	multiplayer.connected_to_server.connect(func() -> void:
-		srv_register.rpc_id(1, cls, nick)
+		srv_register.rpc_id(1, nick)
 		lobby_status.emit("подключено · ждём старта от хоста"))
 	multiplayer.connection_failed.connect(func() -> void:
 		leave()
@@ -133,14 +145,32 @@ func leave() -> void:
 	scores = {}
 	hp = {}
 
-func set_class(cls: String) -> void:
+func sync_identity() -> void:
+	## эволюция локального игрока изменилась — раздать скин/уровень всем
 	if not active:
 		return
+	var cls: = GameState.display_class()
+	var lvl: = GameState.virus_level
+	var cls2: = GameState.display_secondary()
 	if multiplayer.is_server():
 		players[1]["cls"] = cls
+		players[1]["lvl"] = lvl
+		players[1]["cls2"] = cls2
 		_broadcast_players()
 	else:
-		srv_register.rpc_id(1, cls, player_name(my_id()))
+		srv_identity.rpc_id(1, cls, lvl, cls2)
+
+@rpc("any_peer", "call_remote", "reliable")
+func srv_identity(cls: String, lvl: int, cls2: String) -> void:
+	if not multiplayer.is_server():
+		return
+	var id: = multiplayer.get_remote_sender_id()
+	if not players.has(id):
+		return
+	players[id]["cls"] = cls
+	players[id]["lvl"] = lvl
+	players[id]["cls2"] = cls2
+	_broadcast_players()
 
 func _on_peer_connected(_id: int) -> void:
 	pass # ждём srv_register
@@ -153,7 +183,7 @@ func _on_peer_disconnected(id: int) -> void:
 	peer_left.emit(id)
 
 @rpc("any_peer", "call_remote", "reliable")
-func srv_register(cls: String, nick: String) -> void:
+func srv_register(nick: String) -> void:
 	if not multiplayer.is_server():
 		return
 	var id: = multiplayer.get_remote_sender_id()
@@ -163,8 +193,8 @@ func srv_register(cls: String, nick: String) -> void:
 			name_taken = true
 	if nick == "" or name_taken:
 		nick = "ШТАММ-%d" % (players.size() + 1)
-	players[id] = {"cls": cls, "name": nick}
-	_log("зарегистрирован %d: %s (%s), всего %d" % [id, nick, cls, players.size()])
+	players[id] = {"cls": "base", "name": nick, "lvl": 0, "cls2": ""}
+	_log("зарегистрирован %d: %s, всего %d" % [id, nick, players.size()])
 	_broadcast_players()
 
 func _broadcast_players() -> void:
@@ -181,14 +211,14 @@ func cl_players(p: Dictionary) -> void:
 func start_campaign() -> void:
 	## только хост: раздать сетку Грида всем
 	_log("старт кампании, игроков: %d" % players.size())
-	GameState.new_campaign(players[1]["cls"])
+	GameState.new_campaign()
 	cl_campaign.rpc(GameState.grid_nodes)
 	campaign_started.emit()
 	get_tree().change_scene_to_file("res://scenes/grid_world.tscn")
 
 @rpc("authority", "call_remote", "reliable")
 func cl_campaign(nodes: Array) -> void:
-	GameState.new_campaign(my_class_of(my_id()))
+	GameState.new_campaign()
 	GameState.grid_nodes = nodes
 	campaign_started.emit()
 	get_tree().paused = false
@@ -206,6 +236,18 @@ func start_hack(node: Dictionary) -> void:
 	get_tree().paused = false
 	get_tree().change_scene_to_file("res://scenes/level.tscn")
 
+func start_hack_with_fx(node: Dictionary) -> void:
+	## только хост: анимация «нырка» у всех, затем смена сцены
+	cl_enter_fx.rpc(node["id"])
+	enter_fx.emit(node["id"])
+	await get_tree().create_timer(1.5).timeout
+	if active and multiplayer.is_server():
+		start_hack(node)
+
+@rpc("authority", "call_remote", "reliable")
+func cl_enter_fx(node_id: int) -> void:
+	enter_fx.emit(node_id)
+
 @rpc("any_peer", "call_remote", "reliable")
 func srv_request_hack(node_id: int) -> void:
 	## клиент в Гриде предлагает узел — кто первый добежал, тот и выбрал
@@ -214,7 +256,7 @@ func srv_request_hack(node_id: int) -> void:
 	for n in GameState.grid_nodes:
 		if n["id"] == node_id and not n["infected"] and GameState.node_unlocked(n):
 			toast_all("%s выбирает цель: %s" % [player_name(multiplayer.get_remote_sender_id()), n["name"]], Color("35e0ff"))
-			start_hack(n)
+			start_hack_with_fx(n)
 			return
 
 @rpc("authority", "call_remote", "reliable")
@@ -496,43 +538,34 @@ func srv_noise(amount: float, pos: Vector3) -> void:
 		if lvl != null and lvl.has_method("server_noise"):
 			lvl.server_noise(amount, pos, multiplayer.get_remote_sender_id())
 
-# ── сейфы ───────────────────────────────────────────────────
+# ── полевые задачи (хост симулирует прогресс) ───────────────
 
 @rpc("any_peer", "call_local", "reliable")
-func srv_claim_safe(idx: int, claim: bool) -> void:
+func srv_task_hold(idx: int, sub: int, on: bool) -> void:
+	## игрок держит [E] у консоли задачи
 	if multiplayer.is_server():
 		var lvl: = get_tree().current_scene
-		if lvl != null and lvl.has_method("server_claim_safe"):
-			lvl.server_claim_safe(idx, claim, multiplayer.get_remote_sender_id())
+		if lvl != null and lvl.has_method("server_task_hold"):
+			lvl.server_task_hold(idx, sub, on, multiplayer.get_remote_sender_id())
 
-@rpc("any_peer", "call_local", "reliable")
-func srv_safe_done(idx: int, perfect: bool) -> void:
-	if multiplayer.is_server():
-		var lvl: = get_tree().current_scene
-		if lvl != null and lvl.has_method("server_safe_done"):
-			lvl.server_safe_done(idx, perfect, multiplayer.get_remote_sender_id())
+func send_task_state(batch: Array) -> void:
+	cl_task_state.rpc(batch)
+	task_state.emit(batch)
 
-func send_safe_state(dones: Array, busy: Array) -> void:
-	cl_safe_state.rpc(dones, busy)
-	safe_state.emit(dones, busy)
+@rpc("authority", "call_remote", "unreliable_ordered")
+func cl_task_state(batch: Array) -> void:
+	task_state.emit(batch)
 
-@rpc("authority", "call_remote", "reliable")
-func cl_safe_state(dones: Array, busy: Array) -> void:
-	var safes: Array = GameState.node_config.get("safes", [])
-	for i in mini(dones.size(), safes.size()):
-		safes[i]["done"] = dones[i]
-	safe_state.emit(dones, busy)
+func send_task_done(idx: int, participants: Array) -> void:
+	cl_task_done.rpc(idx, participants)
+	task_done.emit(idx, participants)
 
 @rpc("authority", "call_remote", "reliable")
-func cl_claim_denied(idx: int) -> void:
-	claim_denied.emit(idx)
-
-func deny_claim(id: int, idx: int) -> void:
-	## только хост: сейф уже ковыряет другой штамм
-	if id == 1:
-		claim_denied.emit(idx)
-	else:
-		cl_claim_denied.rpc_id(id, idx)
+func cl_task_done(idx: int, participants: Array) -> void:
+	var tasks: Array = GameState.node_config.get("tasks", [])
+	if idx >= 0 and idx < tasks.size():
+		tasks[idx]["done"] = true
+	task_done.emit(idx, participants)
 
 # ── рентген Spyware ─────────────────────────────────────────
 
@@ -557,7 +590,7 @@ func cl_xray() -> void:
 # ── гонка штаммов: счёт (владеет хост) ──────────────────────
 
 func _blank_score() -> Dictionary:
-	return {"score": 0, "delivered": 0, "deposits": 0, "safes": 0,
+	return {"score": 0, "delivered": 0, "deposits": 0, "tasks": 0,
 		"caught": 0, "broken": 0, "revives": 0}
 
 func _reset_scores() -> void:
@@ -567,7 +600,7 @@ func _reset_scores() -> void:
 	_broadcast_scores()
 
 func score_event(id: int, kind: String, arg: = 0.0) -> void:
-	## только хост. kind: deposit / safe / revive / caught / broken
+	## только хост. kind: deposit / task / revive / caught / broken
 	if active and not multiplayer.is_server():
 		return
 	if not scores.has(id):
@@ -579,8 +612,8 @@ func score_event(id: int, kind: String, arg: = 0.0) -> void:
 			s["deposits"] += 1
 			s["delivered"] += int(arg)
 			s["score"] += int(arg)
-		"safe":
-			s["safes"] += 1
+		"task":
+			s["tasks"] += 1
 			s["score"] += 15
 		"revive":
 			s["revives"] += 1
