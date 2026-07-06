@@ -100,40 +100,44 @@ func _actor_for(id: int) -> Node3D:
 func _build_environment() -> void:
 	env = Environment.new()
 	# процедурное небо и мягкий объёмный свет — живее и реалистичнее
+	# ночной город в духе RE2: тёмное небо, луна, свет от фонарей
 	var sky_mat: = ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color(0.07, 0.1, 0.2)
-	sky_mat.sky_horizon_color = Color(0.18, 0.24, 0.36)
-	sky_mat.ground_bottom_color = Color(0.02, 0.03, 0.05)
-	sky_mat.ground_horizon_color = Color(0.12, 0.16, 0.25)
-	sky_mat.sun_angle_max = 30.0
+	sky_mat.sky_top_color = Color(0.025, 0.035, 0.07)
+	sky_mat.sky_horizon_color = Color(0.09, 0.12, 0.2)
+	sky_mat.ground_bottom_color = Color(0.01, 0.015, 0.03)
+	sky_mat.ground_horizon_color = Color(0.07, 0.09, 0.15)
+	sky_mat.sun_angle_max = 20.0
 	var sky: = Sky.new()
 	sky.sky_material = sky_mat
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 1.6
+	env.ambient_light_energy = 1.1
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.adjustment_enabled = true
+	env.adjustment_contrast = 1.08
+	env.adjustment_saturation = 1.05
 	env.ssao_enabled = true
-	env.ssao_intensity = 1.4
+	env.ssao_intensity = 1.8
 	env.glow_enabled = true
-	env.glow_intensity = 0.7
+	env.glow_intensity = 0.85
 	env.glow_bloom = 0.1
 	env.glow_hdr_threshold = 1.0
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SCREEN
 	env.fog_enabled = true
-	env.fog_light_color = Color(0.08, 0.12, 0.2)
-	env.fog_density = 0.0035
+	env.fog_light_color = Color(0.06, 0.09, 0.16)
+	env.fog_density = 0.004
 	env.fog_sky_affect = 0.0
 	var we: = WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 
-	var sun: = DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-50, 40, 0)
-	sun.light_color = Color(0.92, 0.88, 0.8)
-	sun.light_energy = 0.55
-	sun.shadow_enabled = true
-	add_child(sun)
+	var moon: = DirectionalLight3D.new()
+	moon.rotation_degrees = Vector3(-55, 35, 0)
+	moon.light_color = Color(0.55, 0.65, 0.88)
+	moon.light_energy = 0.3
+	moon.shadow_enabled = true
+	add_child(moon)
 
 func _neon(c: Color, e: = 1.8) -> StandardMaterial3D:
 	var m: = StandardMaterial3D.new()
@@ -187,7 +191,7 @@ func _build_ground() -> void:
 	fmat.shader = FloorGrid
 	fmat.set_shader_parameter("cell", 4.0)
 	fmat.set_shader_parameter("line_col", Vector3(0.06, 0.5, 0.7))
-	fmat.set_shader_parameter("energy", 0.85)
+	fmat.set_shader_parameter("energy", 0.45)
 	floor_mesh.material_override = fmat
 	add_child(floor_mesh)
 	_collide(Vector3(240.0, 0.4, length), Vector3(0, -0.2, (60.0 + z_far) * 0.5))
@@ -361,6 +365,25 @@ func _fill_zone(z: int, zone: Dictionary, tier_color: Color) -> void:
 		arrow.position = Vector3(0, 0.1, pz)
 		arrow.rotation_degrees = Vector3(90, 180, 0)
 		add_child(arrow)
+	# уличные фонари: тёплые пятна света вдоль зоны (как ночная улица)
+	var lamp_head: = _neon(Color(1.0, 0.85, 0.55), 3.0)
+	var lamp_z_step: = maxf((z0 - z1) / 3.0, 18.0)
+	var lz: = z0 - lamp_z_step * 0.5
+	while lz > z1 + 8.0:
+		for side in [-1.0, 1.0]:
+			var lx: float = side * (half - 6.0)
+			_solid(Vector3(0.25, 5.0, 0.25), _dark(0.6), Vector3(lx, 2.5, lz))
+			_mesh_box(Vector3(1.4, 0.18, 0.5), _dark(0.6), Vector3(lx - side * 0.6, 5.0, lz))
+			_mesh_box(Vector3(0.8, 0.12, 0.35), lamp_head, Vector3(lx - side * 0.75, 4.9, lz))
+			var sl: = SpotLight3D.new()
+			sl.light_color = Color(1.0, 0.85, 0.55)
+			sl.light_energy = 3.5
+			sl.spot_range = 12.0
+			sl.spot_angle = 50.0
+			sl.position = Vector3(lx - side * 0.75, 4.8, lz)
+			sl.rotation_degrees = Vector3(-90, 0, 0)
+			add_child(sl)
+		lz -= lamp_z_step
 
 # ── серверы ─────────────────────────────────────────────────
 

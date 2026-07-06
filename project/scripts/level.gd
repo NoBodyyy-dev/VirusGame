@@ -136,41 +136,49 @@ func _host_init() -> void:
 # ── окружение ───────────────────────────────────────────────
 
 func _build_environment() -> void:
-	## светлый «гаражный» свет в духе RV There Yet: мягкий ambient,
-	## SSAO для объёма, тёплое солнце с тенями, лёгкий туман
+	## кинематографичный реализм в духе RE2: контрастный свет прожекторов,
+	## мокрый отражающий пол (SSR), объёмный туман, мягкая цветокоррекция
 	env = Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.035, 0.05, 0.075)
+	env.background_color = Color(0.012, 0.016, 0.026)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.38, 0.44, 0.54)
-	env.ambient_light_energy = 1.5
+	env.ambient_light_color = Color(0.3, 0.36, 0.48)
+	env.ambient_light_energy = 0.85
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.adjustment_enabled = true
+	env.adjustment_contrast = 1.08
+	env.adjustment_saturation = 1.05
 	env.ssao_enabled = true
-	env.ssao_intensity = 1.6
-	env.ssao_radius = 1.6
+	env.ssao_intensity = 2.0
+	env.ssao_radius = 1.8
+	env.ssr_enabled = true
+	env.ssr_max_steps = 48
+	env.ssr_fade_in = 0.15
+	env.ssr_fade_out = 2.0
 	env.glow_enabled = true
-	env.glow_intensity = 0.7
-	env.glow_bloom = 0.08
+	env.glow_intensity = 0.85
+	env.glow_bloom = 0.1
 	env.glow_hdr_threshold = 1.0
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SCREEN
 	env.volumetric_fog_enabled = true
-	env.volumetric_fog_density = 0.008
+	env.volumetric_fog_density = 0.014
 	_fog_base = Color(0.55, 0.25, 0.3) if is_boss else [
 		Color(0.35, 0.65, 0.8), Color(0.7, 0.55, 0.3), Color(0.45, 0.3, 0.75), Color(0.7, 0.3, 0.45),
 	][GameState.node_config.get("difficulty", 0)]
 	env.volumetric_fog_albedo = _fog_base
-	env.volumetric_fog_emission = Color(0.015, 0.035, 0.055)
-	env.volumetric_fog_emission_energy = 0.4
+	env.volumetric_fog_emission = Color(0.012, 0.028, 0.045)
+	env.volumetric_fog_emission_energy = 0.3
 	var we: = WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 
-	var sun: = DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-52, 32, 0)
-	sun.light_color = Color(0.95, 0.9, 0.82)
-	sun.light_energy = 0.55
-	sun.shadow_enabled = true
-	add_child(sun)
+	# холодный «лунный» заполняющий свет — основную работу делают прожекторы
+	var moon: = DirectionalLight3D.new()
+	moon.rotation_degrees = Vector3(-58, 28, 0)
+	moon.light_color = Color(0.55, 0.65, 0.85)
+	moon.light_energy = 0.25
+	moon.shadow_enabled = true
+	add_child(moon)
 
 func _neon_mat(c: Color, energy: = 1.6) -> StandardMaterial3D:
 	var m: = StandardMaterial3D.new()
@@ -237,18 +245,28 @@ func _spot_free(pos: Vector3, clearance: = 3.5) -> bool:
 	return true
 
 func _build_arena() -> void:
+	# мокрый бетон: тёмный глянец, в котором отражаются лампы (SSR)
 	var floor_mesh: = MeshInstance3D.new()
 	var plane: = PlaneMesh.new()
 	plane.size = hall
 	floor_mesh.mesh = plane
-	var fmat: = ShaderMaterial.new()
-	fmat.shader = load("res://shaders/floor_grid.gdshader")
-	var tier: int = GameState.node_config.get("difficulty", 0)
-	var tier_cols: = [Vector3(0.08, 0.75, 0.95), Vector3(0.85, 0.6, 0.2), Vector3(0.5, 0.3, 0.95), Vector3(0.9, 0.3, 0.5)]
-	fmat.set_shader_parameter("line_col", Vector3(0.9, 0.15, 0.25) if is_boss else tier_cols[tier])
+	var fmat: = StandardMaterial3D.new()
+	fmat.albedo_color = Color(0.085, 0.095, 0.115)
+	fmat.metallic = 0.1
+	fmat.roughness = 0.18
 	floor_mesh.material_override = fmat
 	add_child(floor_mesh)
 	_collider(Vector3(hall.x, 0.5, hall.y), Vector3(0, -0.25, 0))
+	# цветовой акцент тира — светящаяся окантовка по периметру пола
+	var tier: int = GameState.node_config.get("difficulty", 0)
+	var tier_cols: = [Color(0.08, 0.75, 0.95), Color(0.85, 0.6, 0.2), Color(0.5, 0.3, 0.95), Color(0.9, 0.3, 0.5)]
+	var edge_col: Color = Color(0.9, 0.15, 0.25) if is_boss else tier_cols[tier]
+	var ex: = hall.x * 0.5 - 1.2
+	var ez: = hall.y * 0.5 - 1.2
+	_box(Vector3(hall.x - 2.4, 0.04, 0.18), _neon_mat(edge_col, 1.2), Vector3(0, 0.03, -ez))
+	_box(Vector3(hall.x - 2.4, 0.04, 0.18), _neon_mat(edge_col, 1.2), Vector3(0, 0.03, ez))
+	_box(Vector3(0.18, 0.04, hall.y - 2.4), _neon_mat(edge_col, 1.2), Vector3(-ex, 0.03, 0))
+	_box(Vector3(0.18, 0.04, hall.y - 2.4), _neon_mat(edge_col, 1.2), Vector3(ex, 0.03, 0))
 
 	# новый пол: панели-плиты и напольные кабель-каналы
 	var panel_mat: = _dark_mat()
@@ -280,30 +298,51 @@ func _build_arena() -> void:
 		trim_pos.y = 2.6
 		_box(trim_size * Vector3(1.0, 1.0, 1.02), trim_mat, trim_pos)
 
-	# потолок с рядами световых панелей — «коробка» и много света
+	# потолок с коллайдером — камера больше не выходит за пределы коробки
 	var ceil_mat: = _dark_mat()
-	ceil_mat.albedo_color = Color(0.1, 0.115, 0.14)
+	ceil_mat.albedo_color = Color(0.09, 0.1, 0.125)
+	ceil_mat.roughness = 0.7
 	_box(Vector3(hall.x, 0.35, hall.y), ceil_mat, Vector3(0, 7.3, 0))
+	_collider(Vector3(hall.x, 0.35, hall.y), Vector3(0, 7.3, 0))
+	# промышленные прожекторы: тёплый направленный свет с тенями (стиль RE2)
 	var lamp_mat: = StandardMaterial3D.new()
-	lamp_mat.albedo_color = Color(0.9, 0.93, 1.0)
+	lamp_mat.albedo_color = Color(0.95, 0.9, 0.8)
 	lamp_mat.emission_enabled = true
-	lamp_mat.emission = Color(0.92, 0.95, 1.0)
-	lamp_mat.emission_energy_multiplier = 2.4
+	lamp_mat.emission = Color(1.0, 0.93, 0.78)
+	lamp_mat.emission_energy_multiplier = 3.2
 	var cols_n: = 3
 	var rows_n: = 2
 	for gx in cols_n:
 		for gz in rows_n:
 			var lp: = Vector3(
 				(float(gx) - float(cols_n - 1) * 0.5) * hall.x * 0.3,
-				7.05,
+				7.02,
 				(float(gz) - float(rows_n - 1) * 0.5) * hall.y * 0.42)
-			_box(Vector3(4.6, 0.12, 1.7), lamp_mat, lp)
-			var ol: = OmniLight3D.new()
-			ol.light_color = Color(0.92, 0.95, 1.0)
-			ol.light_energy = 1.5
-			ol.omni_range = 20.0
-			ol.position = lp + Vector3(0, -0.6, 0)
-			add_child(ol)
+			_box(Vector3(4.6, 0.14, 1.7), lamp_mat, lp)
+			_box(Vector3(4.9, 0.1, 2.0), _metal_mat(Color(0.2, 0.21, 0.24), 0.4), lp + Vector3(0, 0.12, 0))
+			var sl: = SpotLight3D.new()
+			sl.light_color = Color(1.0, 0.93, 0.8)
+			sl.light_energy = 4.5
+			sl.spot_range = 16.0
+			sl.spot_angle = 55.0
+			sl.spot_angle_attenuation = 0.8
+			sl.shadow_enabled = true
+			sl.position = lp + Vector3(0, -0.3, 0)
+			sl.rotation_degrees = Vector3(-90, 0, 0)
+			add_child(sl)
+	# настенные светильники — тёплые пятна света по периметру
+	var sconce_mat: = _neon_mat(Color(1.0, 0.75, 0.45), 2.6)
+	for i in 3:
+		for side in [-1.0, 1.0]:
+			var sx: = (float(i) - 1.0) * hall.x * 0.32
+			var sp: = Vector3(sx, 3.6, side * (hz - 0.75))
+			_box(Vector3(0.9, 0.25, 0.18), sconce_mat, sp)
+			var wl: = OmniLight3D.new()
+			wl.light_color = Color(1.0, 0.78, 0.5)
+			wl.light_energy = 1.1
+			wl.omni_range = 8.0
+			wl.position = sp + Vector3(0, 0.3, -side * 0.8)
+			add_child(wl)
 
 	# декоративные «свечки» неона
 	for i in 14:
