@@ -189,18 +189,11 @@ func _neon_mat(c: Color, energy: = 1.6) -> StandardMaterial3D:
 	return m
 
 func _dark_mat() -> StandardMaterial3D:
-	var m: = StandardMaterial3D.new()
-	m.albedo_color = Color(0.13, 0.155, 0.19)
-	m.metallic = 0.5
-	m.roughness = 0.45
-	return m
+	## тёмный пластик техники с шумовой текстурой (см. Mats)
+	return Mats.plastic(Color(0.3, 0.33, 0.38))
 
 func _metal_mat(c: Color, rough: = 0.35) -> StandardMaterial3D:
-	var m: = StandardMaterial3D.new()
-	m.albedo_color = c
-	m.metallic = 0.85
-	m.roughness = rough
-	return m
+	return Mats.metal(c, rough)
 
 func _box(size: Vector3, mat: Material, pos: Vector3, parent: Node = self) -> MeshInstance3D:
 	var mi: = MeshInstance3D.new()
@@ -250,11 +243,7 @@ func _build_arena() -> void:
 	var plane: = PlaneMesh.new()
 	plane.size = hall
 	floor_mesh.mesh = plane
-	var fmat: = StandardMaterial3D.new()
-	fmat.albedo_color = Color(0.085, 0.095, 0.115)
-	fmat.metallic = 0.1
-	fmat.roughness = 0.18
-	floor_mesh.material_override = fmat
+	floor_mesh.material_override = Mats.wet_floor()
 	add_child(floor_mesh)
 	_collider(Vector3(hall.x, 0.5, hall.y), Vector3(0, -0.25, 0))
 	# цветовой акцент тира — светящаяся окантовка по периметру пола
@@ -279,9 +268,9 @@ func _build_arena() -> void:
 		var z: = rng.randf_range(-hall.y * 0.5 + 6.0, hall.y * 0.5 - 6.0)
 		_box(Vector3(hall.x - 14.0, 0.05, 0.3), _neon_mat(Color(0.1, 0.4, 0.55), 0.5), Vector3(2.0, 0.05, z))
 
-	var wall_mat: = _dark_mat()
+	var wall_mat: = Mats.concrete(Color(0.42, 0.44, 0.48))
 	var trim_color: = Color(0.7, 0.12, 0.2) if is_boss else Color(0.12, 0.55, 0.75)
-	var trim_mat: = _neon_mat(trim_color, 1.1)
+	var trim_mat: = _neon_mat(trim_color, 0.7)
 	var hx: = hall.x * 0.5
 	var hz: = hall.y * 0.5
 	for side in [
@@ -299,9 +288,7 @@ func _build_arena() -> void:
 		_box(trim_size * Vector3(1.0, 1.0, 1.02), trim_mat, trim_pos)
 
 	# потолок с коллайдером — камера больше не выходит за пределы коробки
-	var ceil_mat: = _dark_mat()
-	ceil_mat.albedo_color = Color(0.09, 0.1, 0.125)
-	ceil_mat.roughness = 0.7
+	var ceil_mat: = Mats.concrete(Color(0.3, 0.31, 0.34), 0.2)
 	_box(Vector3(hall.x, 0.35, hall.y), ceil_mat, Vector3(0, 7.3, 0))
 	_collider(Vector3(hall.x, 0.35, hall.y), Vector3(0, 7.3, 0))
 	# промышленные прожекторы: тёплый направленный свет с тенями (стиль RE2)
@@ -902,7 +889,7 @@ func _build_robot_visual(root: Node3D) -> void:
 			_box(Vector3(0.45, 0.32, 0.06), seg_mat, Vector3(-0.68 + float(k) * 0.45, 0.72, zz), root)
 	# 4 колеса с дисками
 	var wheels: Array = []
-	var tire_mat: = _metal_mat(Color(0.07, 0.07, 0.08), 0.85)
+	var tire_mat: = Mats.rubber()
 	for sx in [-1.0, 1.0]:
 		for sz in [-0.85, 0.85]:
 			var wheel: = MeshInstance3D.new()

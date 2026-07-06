@@ -51,11 +51,7 @@ func _build_console() -> void:
 	var base_mesh: = BoxMesh.new()
 	base_mesh.size = Vector3(0.9, 1.1, 0.55)
 	base.mesh = base_mesh
-	var base_mat: = StandardMaterial3D.new()
-	base_mat.albedo_color = Color(0.04, 0.06, 0.09)
-	base_mat.metallic = 0.6
-	base_mat.roughness = 0.3
-	base.material_override = base_mat
+	base.material_override = Mats.metal_dark(0.4)
 	base.position.y = 0.55
 	add_child(base)
 
@@ -144,10 +140,7 @@ func _build_relay() -> void:
 	cyl.bottom_radius = 0.28
 	cyl.height = 1.7
 	post.mesh = cyl
-	var pm: = StandardMaterial3D.new()
-	pm.albedo_color = Color(0.05, 0.07, 0.1)
-	pm.metallic = 0.6
-	post.material_override = pm
+	post.material_override = Mats.metal_dark(0.45)
 	post.position.y = 0.85
 	add_child(post)
 

@@ -8,7 +8,6 @@ extends Node3D
 
 const HUDScript: = preload("res://scripts/grid_hud.gd")
 const EvolutionScript: = preload("res://scripts/evolution_ui.gd")
-const FloorGrid: = preload("res://shaders/floor_grid.gdshader")
 const HoloShader: = preload("res://shaders/hologram.gdshader")
 
 const TIER_COLORS: = [Color("35e0ff"), Color("ffb454"), Color("ff5d8f"), Color("8b5cff")]
@@ -147,12 +146,9 @@ func _neon(c: Color, e: = 1.8) -> StandardMaterial3D:
 	m.emission_energy_multiplier = e
 	return m
 
-func _dark(metal: = 0.5) -> StandardMaterial3D:
-	var m: = StandardMaterial3D.new()
-	m.albedo_color = Color(0.12, 0.14, 0.18)
-	m.metallic = metal
-	m.roughness = 0.45
-	return m
+func _dark(_metal: = 0.5) -> StandardMaterial3D:
+	## тёмный металл с шумовой текстурой (см. Mats)
+	return Mats.metal_dark()
 
 func _mesh_box(size: Vector3, mat: Material, pos: Vector3, parent: Node3D = self) -> MeshInstance3D:
 	var mi: = MeshInstance3D.new()
@@ -182,17 +178,13 @@ func _solid(size: Vector3, mat: Material, pos: Vector3) -> void:
 func _build_ground() -> void:
 	var z_far: float = grid_zones_last_z() - 40.0
 	var length: = 60.0 - z_far
+	# реалистичный тёмный асфальт вместо неоновой сетки
 	var floor_mesh: = MeshInstance3D.new()
 	var plane: = PlaneMesh.new()
 	plane.size = Vector2(240.0, length)
 	floor_mesh.mesh = plane
 	floor_mesh.position = Vector3(0, 0, (60.0 + z_far) * 0.5)
-	var fmat: = ShaderMaterial.new()
-	fmat.shader = FloorGrid
-	fmat.set_shader_parameter("cell", 4.0)
-	fmat.set_shader_parameter("line_col", Vector3(0.06, 0.5, 0.7))
-	fmat.set_shader_parameter("energy", 0.45)
-	floor_mesh.material_override = fmat
+	floor_mesh.material_override = Mats.asphalt()
 	add_child(floor_mesh)
 	_collide(Vector3(240.0, 0.4, length), Vector3(0, -0.2, (60.0 + z_far) * 0.5))
 
@@ -205,7 +197,7 @@ func grid_zones_last_z() -> float:
 
 func _build_zones() -> void:
 	var frontier: = GameState.frontier_zone()
-	var wall_mat: = _dark(0.6)
+	var wall_mat: = Mats.concrete(Color(0.4, 0.42, 0.46))
 	for z in GameState.grid_zones.size():
 		var zone: Dictionary = GameState.grid_zones[z]
 		var z0: float = zone["z0"]
@@ -219,7 +211,7 @@ func _build_zones() -> void:
 		for side in [-1.0, 1.0]:
 			_solid(Vector3(1.2, WALL_H, length), wall_mat, Vector3(side * half, WALL_H * 0.5, mid_z))
 			if open_zone:
-				_mesh_box(Vector3(0.3, 0.15, length * 0.96), _neon(tier_color, 0.9), Vector3(side * (half - 0.7), 3.2, mid_z))
+				_mesh_box(Vector3(0.3, 0.15, length * 0.96), _neon(tier_color, 0.45), Vector3(side * (half - 0.7), 3.2, mid_z))
 		# передняя стена зоны 0 — глухая (за спиной старта)
 		if z == 0:
 			_solid(Vector3(half * 2.0 + 2.0, WALL_H, 1.2), wall_mat, Vector3(0, WALL_H * 0.5, z0))
@@ -343,16 +335,17 @@ func _fill_zone(z: int, zone: Dictionary, tier_color: Color) -> void:
 		match rng.randi() % 3:
 			0: # системный блок
 				var h: = rng.randf_range(3.0, 5.0)
-				_solid(Vector3(2.0, h, 3.0), _dark(), pos + Vector3(0, h * 0.5, 0))
-				_mesh_box(Vector3(2.06, 0.1, 0.1), _neon(tier_color, 1.4), pos + Vector3(0, h * 0.75, 1.4))
+				_solid(Vector3(2.0, h, 3.0), Mats.plastic(Color(0.32, 0.34, 0.38)), pos + Vector3(0, h * 0.5, 0))
+				_mesh_box(Vector3(2.06, 0.1, 0.1), _neon(tier_color, 0.7), pos + Vector3(0, h * 0.75, 1.4))
+				_mesh_box(Vector3(1.6, h * 0.5, 0.06), Mats.plastic(Color(0.14, 0.15, 0.17)), pos + Vector3(0, h * 0.45, 1.52))
 			1: # монитор
-				_solid(Vector3(0.4, 1.6, 0.4), _dark(), pos + Vector3(0, 0.8, 0))
-				_solid(Vector3(3.2, 2.0, 0.3), _dark(0.7), pos + Vector3(0, 2.6, 0))
-				_mesh_box(Vector3(2.9, 1.7, 0.06), _neon(tier_color, 0.8), pos + Vector3(0, 2.6, 0.2))
+				_solid(Vector3(0.4, 1.6, 0.4), Mats.metal_dark(), pos + Vector3(0, 0.8, 0))
+				_solid(Vector3(3.2, 2.0, 0.3), Mats.plastic(Color(0.24, 0.26, 0.3)), pos + Vector3(0, 2.6, 0))
+				_mesh_box(Vector3(2.9, 1.7, 0.06), _neon(tier_color, 0.45), pos + Vector3(0, 2.6, 0.2))
 			2: # клавиатура
-				_solid(Vector3(3.4, 0.4, 1.4), _dark(0.6), pos + Vector3(0, 0.2, 0))
+				_solid(Vector3(3.4, 0.4, 1.4), Mats.plastic(Color(0.28, 0.3, 0.34)), pos + Vector3(0, 0.2, 0))
 				for k in 4:
-					_mesh_box(Vector3(0.5, 0.18, 0.5), _neon(tier_color * 0.8, 0.7), pos + Vector3(-1.2 + float(k) * 0.8, 0.42, 0))
+					_mesh_box(Vector3(0.5, 0.18, 0.5), Mats.plastic(Color(0.18, 0.2, 0.23)), pos + Vector3(-1.2 + float(k) * 0.8, 0.42, 0))
 	# центральная дорожка со стрелками к воротам
 	var steps: = int((z0 - z1) / 9.0)
 	for s in range(1, steps):
@@ -418,7 +411,7 @@ func _build_node(node: Dictionary) -> void:
 		pmesh.height = 7.0
 		pmesh.radial_segments = 5
 		penta.mesh = pmesh
-		penta.material_override = _dark(0.7)
+		penta.material_override = Mats.concrete(Color(0.36, 0.37, 0.4), 0.16)
 		penta.position.y = 3.5
 		root.add_child(penta)
 		var pc: = CylinderShape3D.new()
@@ -458,9 +451,9 @@ func _build_node(node: Dictionary) -> void:
 		_refresh_node_label(node)
 		return
 
-	# обычный сервер: стойка с ядром
+	# обычный сервер: реалистичная стойка — металл, вентрешётки, LED, экранчик
 	var h: = 2.4 + float(node["tier"]) * 0.4
-	_mesh_box(Vector3(1.7, h, 1.2), _dark(0.65), Vector3(0, h * 0.5, 0), root)
+	_mesh_box(Vector3(1.7, h, 1.2), Mats.metal_dark(0.45), Vector3(0, h * 0.5, 0), root)
 	var sb: = StaticBody3D.new()
 	sb.collision_layer = 1
 	var cs: = CollisionShape3D.new()
@@ -470,22 +463,40 @@ func _build_node(node: Dictionary) -> void:
 	cs.position.y = h * 0.5
 	sb.add_child(cs)
 	root.add_child(sb)
-	for k in 3:
-		_mesh_box(Vector3(1.6, 0.06, 0.06), _neon(color, 1.4), Vector3(0, 0.5 + float(k) * (h - 1.0) * 0.5, 0.62), root)
+	# передняя панель с юнитами
+	_mesh_box(Vector3(1.5, h - 0.4, 0.06), Mats.plastic(Color(0.22, 0.24, 0.28)), Vector3(0, h * 0.5, 0.6), root)
+	# вентрешётки (тёмные горизонтальные прорези)
+	var vent_mat: = Mats.plastic(Color(0.1, 0.11, 0.13))
+	var units: = int((h - 0.8) / 0.3)
+	for k in units:
+		_mesh_box(Vector3(1.3, 0.14, 0.05), vent_mat, Vector3(-0.05, 0.55 + float(k) * 0.3, 0.64), root)
+	# ряды маленьких статусных LED (живой сервер, а не неон-вывеска)
+	var led_on: = _neon(Color(0.25, 0.9, 0.4) if not node["infected"] else INFECTED_COLOR, 1.6)
+	var led_warn: = _neon(Color(0.95, 0.6, 0.15), 1.4)
+	for k in mini(units, 6):
+		var mat: Material = led_on if (node["id"] + k) % 3 != 0 else led_warn
+		_mesh_box(Vector3(0.05, 0.05, 0.03), mat, Vector3(0.62, 0.55 + float(k) * 0.3, 0.65), root)
+	# статусный экранчик с цветом состояния
+	_mesh_box(Vector3(0.62, 0.4, 0.04), _neon(color, 0.85), Vector3(0.3, h - 0.42, 0.65), root)
+	# кабели сверху в лоток
+	for k in 2:
+		_mesh_box(Vector3(0.07, 0.5, 0.07), vent_mat, Vector3(-0.4 + float(k) * 0.25, h + 0.2, -0.3), root)
+	# ядро-индикатор: небольшая сфера в рамке, без слепящего свечения
+	_mesh_box(Vector3(0.5, 0.06, 0.5), Mats.metal_dark(0.35), Vector3(0, h + 0.03, 0), root)
 	var core: = MeshInstance3D.new()
 	var sm: = SphereMesh.new()
-	sm.radius = 0.42
-	sm.height = 0.84
+	sm.radius = 0.24
+	sm.height = 0.48
 	core.mesh = sm
-	core.material_override = _neon(color, 2.6)
-	core.position.y = h + 0.5
+	core.material_override = _neon(color, 1.2)
+	core.position.y = h + 0.32
 	root.add_child(core)
 	# свет — только у актуальных целей (экономия: серверов много)
 	if unlocked and not infected:
 		var light: = OmniLight3D.new()
 		light.light_color = color
-		light.light_energy = 1.6
-		light.omni_range = 8.0
+		light.light_energy = 1.1
+		light.omni_range = 7.0
 		light.position.y = h + 0.6
 		root.add_child(light)
 	var label: = Label3D.new()
