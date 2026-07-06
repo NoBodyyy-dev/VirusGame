@@ -22,6 +22,7 @@ var invert_until: = 0.0     # подлянка «зеркало»
 var shrink_until: = 0.0     # подлянка «сжатие»
 var locked_until: = 0.0     # клетка/перепрошивка: движение запрещено
 var slow_until: = 0.0       # перепрошивка: замедление
+var haste_until: = 0.0      # СВЕРХТАКТ: разгон
 var carry_factor: = 1.0     # штраф скорости от груза (ставит level)
 var carrying: = false       # несёт лут (ставит level)
 var is_bug: = false         # 0 HP: пищащий баг
@@ -165,6 +166,8 @@ func _physics_process(delta: float) -> void:
 	var speed: = (sprint_speed if sprinting else base_speed) * carry_factor
 	if Time.get_ticks_msec() / 1000.0 < slow_until:
 		speed *= 0.5 # перепрошивка: ноги вязнут в чужом коде
+	if Time.get_ticks_msec() / 1000.0 < haste_until:
+		speed *= 1.45 # сверхтакт
 	if is_bug:
 		speed = BUG_SPEED
 	var accel: = ACCEL_GROUND if on_floor else ACCEL_AIR

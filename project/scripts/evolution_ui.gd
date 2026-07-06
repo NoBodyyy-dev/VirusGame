@@ -56,26 +56,28 @@ func _build_model() -> void:
 		var lvl2: = nid
 		nodes.append({"id": nid, "kind": "level", "lvl": 2, "cls": cls, "pos": dir * 245.0, "r": 13.0, "link": gate})
 		nid += 1
-		# три активки веером
+		# пять умений ветки: 3 веером от УР.2, ещё 2 — за УР.3
 		var pool: Array = GameState.BRANCH_ABILITIES[cls]
-		var fan: = [-0.16, 0.0, 0.16]
+		var fan: = [-0.22, 0.0, 0.22]
 		var ab_ids: Array = []
 		for k in 3:
 			var a2: float = ang + fan[k]
 			var d2: = Vector2(cos(a2), sin(a2))
-			var rr: = 310.0 if k != 1 else 330.0
+			var rr: = 305.0 if k != 1 else 328.0
 			nodes.append({"id": nid, "kind": "ability", "cls": cls, "ability": pool[k],
-				"slot": k, "pos": d2 * rr, "r": 17.0 if k == 0 else 15.0, "link": lvl2 if k != 2 else -1})
+				"slot": k, "pos": d2 * rr, "r": 17.0 if k == 0 else 15.0, "link": lvl2})
 			ab_ids.append(nid)
 			nid += 1
 		var lvl3: = nid
-		nodes.append({"id": nid, "kind": "level", "lvl": 3, "cls": cls, "pos": dir * 395.0, "r": 13.0, "link": ab_ids[1]})
+		nodes.append({"id": nid, "kind": "level", "lvl": 3, "cls": cls, "pos": dir * 398.0, "r": 13.0, "link": ab_ids[1]})
 		nid += 1
-		# третья активка цепляется за УР.3
-		nodes[ab_ids[2]]["link"] = lvl3
-		nodes[ab_ids[2]]["pos"] = Vector2(cos(ang + 0.24), sin(ang + 0.24)) * 415.0
+		for k2 in 2:
+			var a3: float = ang + (-0.17 if k2 == 0 else 0.17)
+			nodes.append({"id": nid, "kind": "ability", "cls": cls, "ability": pool[3 + k2],
+				"slot": 3 + k2, "pos": Vector2(cos(a3), sin(a3)) * 448.0, "r": 15.0, "link": lvl3})
+			nid += 1
 		# узел доп. ветки (виден на УР.3)
-		nodes.append({"id": nid, "kind": "secondary", "cls": cls, "pos": dir * 455.0, "r": 15.0, "link": lvl3})
+		nodes.append({"id": nid, "kind": "secondary", "cls": cls, "pos": dir * 498.0, "r": 15.0, "link": lvl3})
 		nid += 1
 
 func _node_screen_pos(n: Dictionary) -> Vector2:
@@ -318,12 +320,16 @@ func _draw_tooltip() -> void:
 			title = String(ab["name"])
 			lines.append(String(ab["desc"]))
 			lines.append("расход: %d BW" % int(GameState.ability_cost(n["ability"])))
-			var slot: = GameState.active_abilities.size()
-			if st == "open":
-				lines.append("КЛИК: экипировать в слот %d" % (slot + 1))
+			var depth: = GameState.ability_depth(n["ability"])
+			if st == "done":
+				lines.append("КЛИК: снять умение (откат бесплатный, слот освободится)")
+			elif st == "open":
+				lines.append("КЛИК: экипировать в слот %d" % (GameState.active_abilities.size() + 1))
 			elif st == "task":
-				if slot < 3 and not GameState.ability_task_done(slot):
-					lines.append("ЗАДАНИЕ: %s" % GameState.ability_task_progress(slot))
+				if not GameState.ability_task_done(depth):
+					lines.append("ЗАДАНИЕ: %s" % GameState.ability_task_progress(depth))
+				elif GameState.active_abilities.size() >= GameState.max_ability_slots():
+					lines.append("слоты заняты — сними другое умение или подними уровень")
 				else:
 					lines.append("нужен уровень штамма выше")
 		"secondary":
@@ -350,7 +356,7 @@ func _draw_tooltip() -> void:
 
 func _draw_footer() -> void:
 	var font: = get_theme_default_font()
-	var text: = "🖱 Колесо — зум · клик — прокачка · ESC/Tab — закрыть"
+	var text: = "🖱 Колесо — зум · клик — прокачка · клик по взятому умению — откат · ESC/Tab — закрыть"
 	var tsz: = font.get_string_size(text, HORIZONTAL_ALIGNMENT_CENTER, -1, 17)
 	draw_string(font, Vector2(size.x - tsz.x - 30.0, size.y - 22.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color(0.75, 0.7, 0.85))
 	if GameState.branch == "":
@@ -393,6 +399,11 @@ func _click_node(id: int) -> void:
 		return
 	var n: Dictionary = nodes[id]
 	var st: = _node_state(n)
+	# откат: клик по экипированному умению снимает его
+	if st == "done" and n["kind"] == "ability":
+		if GameState.unequip_ability(n["ability"]):
+			Sfx.play("layer_done", -6.0, 0.7)
+		return
 	if st != "open":
 		Sfx.play("ui_click", -8.0, 0.6)
 		return

@@ -43,7 +43,7 @@ const CLASSES: = {
 	},
 	"spyware": {
 		"name": "SPYWARE", "role": "Разведчик / глаза", "color": Color("ffb454"),
-		"passive": "Видит сектора обзора камер и полную сводку системы",
+		"passive": "Видит радиусы обзора роботов-охранников и полную сводку системы",
 		"active": "Скан — лут и угрозы видны сквозь стены (6с) всем", "cost": 20,
 		"attrs": {"str": 3, "dex": 6, "int": 10},
 	},
@@ -72,29 +72,37 @@ const BRANCHES: = ["trojan", "worm", "ransomware", "spyware", "adware", "rootkit
 # ── активные умения (общий пул) ─────────────────────────────
 const ABILITIES: = {
 	"dash": {"name": "РЫВОК", "desc": "бросок вперёд (работает даже с грузом)", "cost": 15},
-	"morph": {"name": "ЛОЖНЫЙ ФАЙЛ", "desc": "стать ящиком — враги слепы, пока не двинешься", "cost": 20},
-	"freeze": {"name": "ШИФРОВАНИЕ", "desc": "заморозка всех стражей на 3с", "cost": 35},
-	"xray": {"name": "СКАН", "desc": "лут и стражи видны сквозь стены (6с) всем", "cost": 20},
-	"decoy": {"name": "ФАНТОМ", "desc": "приманка уводит стражей (5с)", "cost": 25},
+	"morph": {"name": "ЛОЖНЫЙ ФАЙЛ", "desc": "стать ящиком — роботы слепы, пока не двинешься", "cost": 20},
+	"freeze": {"name": "ШИФРОВАНИЕ", "desc": "заморозка системы, ловушек и роботов на 3с", "cost": 35},
+	"xray": {"name": "СКАН", "desc": "лут и угрозы видны сквозь стены (6с) всем", "cost": 20},
+	"decoy": {"name": "ФАНТОМ", "desc": "приманка уводит ловушки (5с)", "cost": 25},
 	"jam": {"name": "ГЛУШИЛКА", "desc": "тревога −12", "cost": 30},
 	"heal": {"name": "ДЕФИБРИЛЛЯЦИЯ", "desc": "оживить бага рядом (или +1 HP себе)", "cost": 40},
+	"haste": {"name": "СВЕРХТАКТ", "desc": "разгон себя +45% скорости на 5с", "cost": 20},
+	"emp": {"name": "ЭМИ-РАЗРЯД", "desc": "оглушить ближайшего робота на 4с", "cost": 25},
+	"cloak": {"name": "СТЕЛС-ПАКЕТ", "desc": "невидим для роботов 4с (движение не выдаёт)", "cost": 30},
+	"purge": {"name": "ЧИСТКА", "desc": "сжечь ВСЕ летящие ловушки системы", "cost": 30},
 }
 
-## первая активка ветки выдаётся на УР.1, остальные открываются заданиями
+## ветка = 5 умений: сигнатурное на УР.1, дальше — по карьерным заданиям.
+## полный набор открывается примерно к началу зоны T3
 const BRANCH_ABILITIES: = {
-	"trojan": ["morph", "decoy", "xray"],
-	"worm": ["dash", "decoy", "jam"],
-	"ransomware": ["freeze", "heal", "jam"],
-	"spyware": ["xray", "jam", "decoy"],
-	"adware": ["decoy", "morph", "freeze"],
-	"rootkit": ["jam", "morph", "xray"],
-	"botnet": ["heal", "freeze", "dash"],
+	"trojan": ["morph", "cloak", "decoy", "xray", "purge"],
+	"worm": ["dash", "haste", "decoy", "jam", "purge"],
+	"ransomware": ["freeze", "emp", "heal", "jam", "haste"],
+	"spyware": ["xray", "jam", "cloak", "decoy", "emp"],
+	"adware": ["decoy", "morph", "freeze", "haste", "purge"],
+	"rootkit": ["jam", "cloak", "morph", "xray", "emp"],
+	"botnet": ["heal", "purge", "freeze", "dash", "emp"],
 }
 
-## задания на разблокировку 2-й и 3-й активки (карьерные счётчики)
+## разблокировка умений по ГЛУБИНЕ в ветке (карьерные счётчики).
+## глубина 0 — сигнатурное, даётся с УР.1
 const ABILITY_TASKS: = {
 	1: {"desc": "внеси 6 предметов в портал", "key": "deposits", "need": 6},
 	2: {"desc": "выполни 4 полевые задачи", "key": "tasks", "need": 4},
+	3: {"desc": "переживи 8 рейдов", "key": "raids", "need": 8},
+	4: {"desc": "вынеси добычи на ◈350 суммарно", "key": "delivered", "need": 350},
 }
 
 # ── уровни развития штамма 0..3 ─────────────────────────────
@@ -305,31 +313,51 @@ func ability_pool() -> Array:
 				pool.append(id)
 	return pool
 
-func ability_task_done(slot: int) -> bool:
-	## slot 1 и 2 требуют выполненного задания; slot 0 — сигнатурный
-	if slot <= 0:
+func ability_depth(id: String) -> int:
+	## глубина умения в ветке (0 = сигнатурное); для доп. ветки — её глубина
+	var d: = 99
+	for cls in [branch, secondary_branch]:
+		if cls == "" or not BRANCH_ABILITIES.has(cls):
+			continue
+		var idx: int = BRANCH_ABILITIES[cls].find(id)
+		if idx >= 0:
+			d = mini(d, idx)
+	return d
+
+func ability_task_done(depth: int) -> bool:
+	## разблокировка по глубине ветки: 0 — свободно, дальше — карьерные задания
+	if depth <= 0:
 		return true
-	var t: Dictionary = ABILITY_TASKS[slot]
+	if not ABILITY_TASKS.has(depth):
+		return false
+	var t: Dictionary = ABILITY_TASKS[depth]
 	return career.get(t["key"], 0) >= t["need"]
 
-func ability_task_progress(slot: int) -> String:
-	if slot <= 0:
+func ability_task_progress(depth: int) -> String:
+	if depth <= 0 or not ABILITY_TASKS.has(depth):
 		return ""
-	var t: Dictionary = ABILITY_TASKS[slot]
+	var t: Dictionary = ABILITY_TASKS[depth]
 	return "%s (%d/%d)" % [t["desc"], mini(career.get(t["key"], 0), t["need"]), t["need"]]
 
 func can_pick_ability(id: String) -> bool:
 	if id in active_abilities or not id in ability_pool():
 		return false
-	var slot: = active_abilities.size()
-	if slot >= max_ability_slots():
+	if active_abilities.size() >= max_ability_slots():
 		return false
-	return ability_task_done(slot)
+	return ability_task_done(ability_depth(id))
 
 func pick_ability(id: String) -> bool:
 	if not can_pick_ability(id):
 		return false
 	active_abilities.append(id)
+	evolution_changed.emit()
+	return true
+
+func unequip_ability(id: String) -> bool:
+	## откат: снять умение со слота (вернуть можно в любой момент бесплатно)
+	if not id in active_abilities:
+		return false
+	active_abilities.erase(id)
 	evolution_changed.emit()
 	return true
 

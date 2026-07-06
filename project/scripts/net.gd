@@ -298,7 +298,7 @@ func srv_add_alarm(amount: float, source: String) -> void:
 @rpc("any_peer", "call_remote", "reliable")
 func srv_spend_bw(cost: float) -> void:
 	if multiplayer.is_server():
-		GameState.bandwidth = maxf(GameState.bandwidth - cost, 0.0)
+		GameState.bandwidth = clampf(GameState.bandwidth - cost, 0.0, GameState.max_bandwidth)
 
 func _process(delta: float) -> void:
 	if not active or not multiplayer.is_server():
@@ -543,11 +543,11 @@ func cl_enemy_fx(id: int, kind: String) -> void:
 
 @rpc("any_peer", "call_remote", "reliable")
 func srv_enemy_effect(kind: String, arg: float, pos: Vector3) -> void:
-	# freeze / decoy от активок клиентов
+	# freeze / decoy / emp / cloak / purge от активок клиентов
 	if multiplayer.is_server():
 		var lvl: = get_tree().current_scene
 		if lvl != null and lvl.has_method("apply_enemy_effect"):
-			lvl.apply_enemy_effect(kind, arg, pos)
+			lvl.apply_enemy_effect(kind, arg, pos, multiplayer.get_remote_sender_id())
 
 # ── шум (питает тревогу и слух Хантера) ─────────────────────
 

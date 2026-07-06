@@ -50,15 +50,16 @@ var _fog_base: = Color(0.3, 0.6, 0.8)
 var _next_lid: = 0
 var _next_uid: = 0
 
-# ── СИСТЕМА: камеры, ловушки, робот ──
-var cams: Array = []          # [{node, cone, pos, base_yaw, sweep, phase}]
+# ── СИСТЕМА: роботы-охранники по углам, ловушки ──
 var sys_units: = {}           # uid -> {type, node, ...} (хост симулирует, клиент — куклы)
 var sys_screen_label: Label3D
 var sys_screen_mat: StandardMaterial3D
 var _trap_timer: = 6.0
 var _traps_sent: = 0
 var _marked: = {}             # id -> until (хост)
-var _robot_spawned: = false
+var _cloaked: = {}            # id -> until (хост): стелс-пакет
+var _hunt_announced: = false
+var _hooked_until: = 0.0      # меня тянет крюком к роботу
 var _decoy_until: = 0.0
 var _decoy_pos: = Vector3.ZERO
 var _frozen_until: = 0.0      # шифрование: система замирает
@@ -106,7 +107,6 @@ func _ready() -> void:
 	_build_portal_and_pad()
 	_build_cooler()
 	_build_system_screen()
-	_build_cameras()
 	_spawn_player()
 	_spawn_task_stations()
 	_build_clutter()
@@ -139,6 +139,21 @@ func _host_init() -> void:
 		Net.set_hp(1, GameState.my_max_hp, false)
 	_spawn_loot_table()
 	_trap_timer = float(GameState.node_config.get("trap_interval", 12.0))
+	# роботы-охранники с самого старта паркуются по углам зала
+	var hx: = hall.x * 0.5
+	var hz: = hall.y * 0.5
+	var corners: = [
+		Vector3(hx - 4.0, 0.0, hz - 4.0), Vector3(-hx + 4.0, 0.0, -hz + 4.0),
+		Vector3(hx - 4.0, 0.0, -hz + 4.0), Vector3(-hx + 4.0, 0.0, hz - 4.0),
+	]
+	var n: = clampi(int(GameState.node_config.get("sensitivity", 1)), 1, 4)
+	for i in n:
+		var uid: = _spawn_unit("ROBOT", corners[i])
+		sys_units[uid]["home"] = corners[i]
+	if is_boss:
+		var bpos: = Vector3(0.0, 0.0, -hz + 5.0)
+		var buid: = _spawn_unit("ROBOT", bpos)
+		sys_units[buid]["home"] = bpos
 
 # ── окружение ───────────────────────────────────────────────
 
@@ -736,7 +751,7 @@ func _build_hack_props() -> void:
 			_box(Vector3(0.04, 0.5, 0.04), Mats.plastic(Color(0.2, 0.2, 0.22)), Vector3(-side * 0.3, 3.1, -0.25 + float(a2) * 0.5), root)
 		var led: = _box(Vector3(0.08, 0.08, 0.08), _neon_mat(Color(0.3, 0.9, 0.4), 1.8), Vector3(-side * 0.58, 2.6, 0.25), root)
 		var lbl: = Label3D.new()
-		lbl.text = "РОУТЕР\n[E] ослепить камеру (12с)"
+		lbl.text = "РОУТЕР\n[E] заглушить робота (12с)"
 		lbl.font_size = 22
 		lbl.modulate = Color(0.4, 0.8, 1.0)
 		lbl.outline_size = 6
@@ -811,12 +826,12 @@ func server_hack_prop(idx: int, sender: int) -> void:
 		return
 	match hp["kind"]:
 		"router":
-			var ci: = _nearest_cam_to(hp["pos"])
-			if ci >= 0:
-				Net.send_system_fx(ci, "camoff", 12.0) if Net.active else _on_system_fx(ci, "camoff", 12.0)
+			var ru: = _nearest_robot_uid(hp["pos"])
+			if ru >= 0:
+				Net.send_system_fx(ru, "robo_off", 12.0) if Net.active else _on_system_fx(ru, "robo_off", 12.0)
 			hp["used"] = true
 			Net.send_system_fx(idx, "prop_used", 0.0) if Net.active else _on_system_fx(idx, "prop_used", 0.0)
-			var msg: = "📡 %s взломал роутер — камера ослепла на 12с" % Net.player_name(sender)
+			var msg: = "📡 %s взломал роутер — ближайший робот заглушён на 12с" % Net.player_name(sender)
 			if Net.active:
 				Net.toast_all(msg, Color(0.4, 0.8, 1.0))
 			else:
@@ -832,19 +847,6 @@ func server_hack_prop(idx: int, sender: int) -> void:
 			else:
 				hud.toast(msg2, Color(0.95, 0.8, 0.35))
 			Sfx.play("layer_done", -4.0, 0.8)
-
-func _nearest_cam_to(pos: Vector3) -> int:
-	var now: = Time.get_ticks_msec() / 1000.0
-	var best: = -1
-	var best_d: = 999.0
-	for i in cams.size():
-		if cams[i].get("off_until", 0.0) > now:
-			continue
-		var d: float = Vector3(cams[i]["pos"]).distance_to(pos)
-		if d < best_d:
-			best_d = d
-			best = i
-	return best
 
 func _siphon_terminal(idx: int) -> void:
 	## локально: каждый штамм может слить каждый терминал один раз
@@ -884,8 +886,8 @@ func _refresh_system_screen() -> void:
 	var cfg: Dictionary = GameState.node_config
 	var ph: = GameState.alarm_phase()
 	var status: String = ["РЕЖИМ СНА", "СКАНИРОВАНИЕ", "ЗАЧИСТКА", "!! ВТОРЖЕНИЕ !!"][ph]
-	sys_screen_label.text = "СИСТЕМА %s\nчувствительность %d · камер %d\nтревога %d%% · %s" % [
-		cfg.get("antivirus", "?"), cfg.get("sensitivity", 1), cams.size(),
+	sys_screen_label.text = "СИСТЕМА %s\nчувствительность %d · роботов %d\nтревога %d%% · %s" % [
+		cfg.get("antivirus", "?"), cfg.get("sensitivity", 1), _robots_count(),
 		roundi(GameState.alarm), status]
 	var col: Color = [Color(0.12, 0.5, 0.7), Color(0.8, 0.6, 0.2), Color(0.85, 0.35, 0.2), Color(0.9, 0.12, 0.2)][ph]
 	sys_screen_mat.emission = col
@@ -893,104 +895,59 @@ func _refresh_system_screen() -> void:
 		# 100%: система мигает красным
 		sys_screen_mat.emission_energy_multiplier = 1.6 + sin(Time.get_ticks_msec() / 90.0) * 1.2
 
-# ── СИСТЕМА: камеры на стенах ───────────────────────────────
+# ── СИСТЕМА: хелперы роботов ────────────────────────────────
 
-func _build_cameras() -> void:
-	var count: int = GameState.node_config.get("sensitivity", 1)
-	var hx: = hall.x * 0.5
-	var hz: = hall.y * 0.5
-	for i in count:
-		# камеры равномерно по периметру (кроме стены портала)
-		var side: = i % 3
-		var pos: Vector3
-		var face: float
-		match side:
-			0:
-				pos = Vector3(rng.randf_range(-hx * 0.5, hx - 6.0), 4.6, -hz + 0.8)
-				face = 0.0
-			1:
-				pos = Vector3(rng.randf_range(-hx * 0.5, hx - 6.0), 4.6, hz - 0.8)
-				face = PI
-			2:
-				pos = Vector3(hx - 0.8, 4.6, rng.randf_range(-hz + 6.0, hz - 6.0))
-				face = PI * 0.5
-		var cam_root: = Node3D.new()
-		cam_root.position = pos
-		add_child(cam_root)
-		_box(Vector3(0.7, 0.5, 0.9), _dark_mat(), Vector3.ZERO, cam_root)
-		var eye: = MeshInstance3D.new()
-		var sm: = SphereMesh.new()
-		sm.radius = 0.18
-		sm.height = 0.36
-		eye.mesh = sm
-		eye.material_override = _neon_mat(Color(1.0, 0.3, 0.3), 2.5)
-		eye.position = Vector3(0, 0, 0.5)
-		cam_root.add_child(eye)
-		# конус сканирования
-		var cone: = MeshInstance3D.new()
-		var cmesh: = CylinderMesh.new()
-		cmesh.top_radius = 0.05
-		var crange: float = GameState.node_config.get("cam_range", 12.0)
-		cmesh.bottom_radius = crange * 0.36
-		cmesh.height = crange
-		var cmat: = StandardMaterial3D.new()
-		cmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		cmat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-		cmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		cmat.albedo_color = Color(1.0, 0.25, 0.25, 0.05)
-		cmat.cull_mode = BaseMaterial3D.CULL_DISABLED
-		cone.mesh = cmesh
-		cone.material_override = cmat
-		cone.rotation.x = deg_to_rad(-64.0)
-		cone.position = Vector3(0, -crange * 0.42, crange * 0.34)
-		cam_root.add_child(cone)
-		cams.append({
-			"node": cam_root, "cone_mat": cmat, "pos": pos,
-			"base_yaw": face, "sweep": 0.85, "phase": rng.randf() * TAU,
-			"range": crange, "off_until": 0.0,
-		})
+func _robot_sight() -> float:
+	return float(GameState.node_config.get("cam_range", 12.0)) + 3.0
 
-func _cam_dir(cam: Dictionary, t: float) -> Vector3:
-	var yaw: float = cam["base_yaw"] + sin(t * 0.5 + cam["phase"]) * cam["sweep"]
-	return Vector3(sin(yaw), 0.0, cos(yaw))
+func _robots_count() -> int:
+	var c: = 0
+	for uid in sys_units:
+		if sys_units[uid]["type"] == "ROBOT":
+			c += 1
+	return c
 
-func _cams_tick(_delta: float) -> void:
-	## каждый пир: поворот камер детерминирован временем
-	var t: = Time.get_ticks_msec() / 1000.0
-	var active: = GameState.alarm_phase() >= 1
-	for cam in cams:
-		var node: Node3D = cam["node"]
-		var cmat: StandardMaterial3D = cam["cone_mat"]
-		if cam.get("off_until", 0.0) > t:
-			cmat.albedo_color.a = 0.0 # роутер ослепил камеру
+func _nearest_robot_uid(pos: Vector3) -> int:
+	var best: = -1
+	var best_d: = 999.0
+	for uid in sys_units:
+		var u: Dictionary = sys_units[uid]
+		if u["type"] != "ROBOT" or not is_instance_valid(u["node"]):
 			continue
-		var dir: = _cam_dir(cam, t)
-		node.rotation.y = atan2(dir.x, dir.z)
-		cmat.albedo_color.a = 0.11 if active else 0.03
-		# spyware видит сектора камер ярче
-		if GameState.has_passive("spyware"):
-			cmat.albedo_color.a += 0.05
+		var d: float = u["node"].global_position.distance_to(pos)
+		if d < best_d:
+			best_d = d
+			best = uid
+	return best
+
+func _nearest_robot_pos(pos: Vector3) -> Vector3:
+	var uid: = _nearest_robot_uid(pos)
+	if uid < 0:
+		return Vector3.INF
+	return sys_units[uid]["node"].global_position
+
+func _is_hidden(id: int, now: float) -> bool:
+	## морф-ящик и стелс-пакет прячут от роботов
+	if _cloaked.get(id, 0.0) > now:
+		return true
+	if id == Net.my_id():
+		return player.morphed
+	if avatars.has(id):
+		return avatars[id].morph_hidden
+	return false
 
 # ── СИСТЕМА: хост-директор (ловушки и робот) ────────────────
 
 func _detected_players() -> Array:
-	## только хост: кто в конусе камеры / помечен / все при 100%
+	## только хост: роботы — глаза системы. Помеченные и все при 100% — видны
 	var actors: = _all_actor_nodes()
 	var now: = Time.get_ticks_msec() / 1000.0
 	var out: Array = []
-	var t: = now
 	var everyone: = GameState.alarm_phase() >= 3
+	var sight: = _robot_sight()
 	for id in actors:
 		var bugged: = Net.is_bug(id) if Net.active else GameState.my_bug
-		if bugged:
-			continue
-		# троян-ящик невидим для камер
-		var hidden: = false
-		if id == Net.my_id():
-			hidden = player.morphed
-		elif avatars.has(id):
-			hidden = avatars[id].morph_hidden
-		if hidden:
+		if bugged or _is_hidden(id, now):
 			continue
 		if everyone or _marked.get(id, 0.0) > now:
 			out.append(id)
@@ -998,14 +955,13 @@ func _detected_players() -> Array:
 		if GameState.alarm_phase() < 1:
 			continue
 		var p: Vector3 = actors[id].global_position
-		for cam in cams:
-			if cam.get("off_until", 0.0) > t:
-				continue # камера ослеплена роутером
-			var cpos: Vector3 = cam["pos"]
-			var flat: = Vector3(p.x - cpos.x, 0.0, p.z - cpos.z)
-			if flat.length() > cam["range"]:
+		for uid in sys_units:
+			var su: Dictionary = sys_units[uid]
+			if su["type"] != "ROBOT" or not is_instance_valid(su["node"]):
 				continue
-			if flat.normalized().dot(_cam_dir(cam, t)) > 0.82:
+			if now < su.get("stun_until", 0.0):
+				continue # робот заглушён роутером/ЭМИ
+			if su["node"].global_position.distance_to(p) < sight:
 				out.append(id)
 				break
 	return out
@@ -1030,11 +986,10 @@ func _system_tick(delta: float) -> void:
 			"ROBOT": _robot_tick(u, delta)
 			"HOOK": _hook_tick(u, delta)
 			_: _trap_tick(u, delta)
-	# робот выезжает на 100%
-	if GameState.alarm_phase() >= 3 and not _robot_spawned:
-		_robot_spawned = true
-		_spawn_unit("ROBOT", Vector3(hall.x * 0.5 - 4.0, 0.0, 0.0))
-		var msg: = "⚠ СИСТЕМА ВЫСЛАЛА РОБОТА-ОХОТНИКА! Все видны!"
+	# 100%: роботы покидают углы и выходят на охоту
+	if GameState.alarm_phase() >= 3 and not _hunt_announced:
+		_hunt_announced = true
+		var msg: = "⚠ 100%: РОБОТЫ ВЫЕХАЛИ ИЗ УГЛОВ — все видны, бегите!"
 		if Net.active:
 			Net.toast_all(msg, Color(1.0, 0.15, 0.25))
 		else:
@@ -1245,6 +1200,19 @@ func _build_robot_visual(root: Node3D) -> void:
 	rl.omni_range = 9.0
 	rl.position.y = 2.6
 	root.add_child(rl)
+	# кольцо радиуса обзора на полу (Spyware видит ярче)
+	var ring_vis: = MeshInstance3D.new()
+	var rtor: = TorusMesh.new()
+	var sight: = _robot_sight()
+	rtor.inner_radius = sight - 0.2
+	rtor.outer_radius = sight
+	ring_vis.mesh = rtor
+	var ring_mat: = _holo_add(Color(1.0, 0.25, 0.25), 0.05)
+	ring_vis.material_override = ring_mat
+	ring_vis.position.y = 0.05
+	root.add_child(ring_vis)
+	root.set_meta("sight_mat", ring_mat)
+	root.set_meta("lens_mat", lens.material_override)
 
 func _units_visual_tick(delta: float) -> void:
 	## каждый пир: колёса крутятся, маячок мигает, трос крюка тянется к роботу
@@ -1269,9 +1237,19 @@ func _units_visual_tick(delta: float) -> void:
 				for w in node.get_meta("wheels", []):
 					if is_instance_valid(w):
 						w.rotate_object_local(Vector3.UP, spin)
+				var stunned: bool = t < u.get("stun_until", 0.0)
 				var bmat: StandardMaterial3D = node.get_meta("beacon_mat", null)
 				if bmat != null:
-					bmat.emission_energy_multiplier = 1.2 + 3.0 * maxf(sin(t * 7.0), 0.0)
+					bmat.emission_energy_multiplier = 0.2 if stunned else 1.2 + 3.0 * maxf(sin(t * 7.0), 0.0)
+				var smat: StandardMaterial3D = node.get_meta("sight_mat", null)
+				if smat != null:
+					if stunned:
+						smat.albedo_color.a = 0.008
+					else:
+						smat.albedo_color.a = 0.12 if GameState.has_passive("spyware") else 0.05
+				var lmat: StandardMaterial3D = node.get_meta("lens_mat", null)
+				if lmat != null:
+					lmat.emission_energy_multiplier = 0.4 if stunned else 4.0
 			"HOOK":
 				node.rotate_z(delta * 4.0)
 				var cable: MeshInstance3D = u.get("cable", null)
@@ -1419,64 +1397,79 @@ func _hurt_player(id: int, dmg: int, from: Vector3) -> void:
 			player.set_bug(true)
 			hud.toast("КРИТИЧЕСКИЙ СБОЙ: ты теперь БАГ. Ползи к порталу!", Color(1.0, 0.3, 0.3))
 
-# ── робот-охотник (100% тревоги) ────────────────────────────
-
-func _strongest_player() -> int:
-	var actors: = _all_actor_nodes()
-	var best: = -1
-	var best_score: = -999.0
-	for id in actors:
-		var bugged: = Net.is_bug(id) if Net.active else GameState.my_bug
-		if bugged:
-			continue
-		var s: = float(Net.my_level_of(id)) * 100.0
-		if Net.scores.has(id):
-			s += float(Net.scores[id]["score"])
-		if s > best_score:
-			best_score = s
-			best = id
-	return best
+# ── роботы-охранники: угол → крюки (50%) → погоня (100%) ────
 
 func _robot_tick(u: Dictionary, delta: float) -> void:
 	var node: Node3D = u["node"]
 	if not is_instance_valid(node):
 		return
 	var now: = Time.get_ticks_msec() / 1000.0
-	if now < _frozen_until:
+	if now < _frozen_until or now < u.get("stun_until", 0.0):
 		return
-	# крюк в полёте — робот стоит
 	if u["hook_out"]:
-		return
-	var target: = _strongest_player()
-	u["target"] = target
+		return # пока крюк в полёте — робот замер
 	var actors: = _all_actor_nodes()
-	if target < 0 or not actors.has(target):
-		return
-	var tp: Vector3 = actors[target].global_position
-	var dir: = tp - node.global_position
-	dir.y = 0.0
-	var dist: = dir.length()
-	if dist > 1.6:
-		# скорость робота = скорость игрока без спринта; препятствия объезжает
-		_move_unit_collide(node, dir.normalized(), 6.0 * delta)
-		node.rotation.y = atan2(dir.x, dir.z)
-	else:
-		_hurt_player(target, 1, node.global_position)
-	# случайный выстрел крюком
+	var sight: = _robot_sight()
+	# ближайшая видимая цель
+	var target: = -1
+	var best: = 999.0
+	for id in actors:
+		var bugged: = Net.is_bug(id) if Net.active else GameState.my_bug
+		if bugged or _is_hidden(id, now):
+			continue
+		var d: float = node.global_position.distance_to(actors[id].global_position)
+		if d < best:
+			best = d
+			target = id
+	u["target"] = target
+	u["melee_cd"] = maxf(u.get("melee_cd", 0.0) - delta, 0.0)
 	u["hook_cd"] -= delta
-	if u["hook_cd"] <= 0.0 and dist < 22.0 and dist > 3.0:
-		u["hook_cd"] = rng.randf_range(6.0, 11.0)
-		u["hook_out"] = true
-		var hook_uid: = _spawn_unit("HOOK", node.global_position + Vector3(0, 1.6, 0))
-		var h: Dictionary = sys_units[hook_uid]
-		h["dir"] = dir.normalized()
-		h["owner"] = _uid_of(u)
-		h["ret"] = false
-		var msg: = "⚠ РОБОТ ВЫПУСТИЛ КРЮК — уворачивайтесь!"
-		if Net.active:
-			Net.toast_all(msg, Color(1.0, 0.5, 0.2))
-		else:
-			hud.toast(msg, Color(1.0, 0.5, 0.2))
+
+	if GameState.alarm_phase() >= 3 and target >= 0:
+		# 100%: выезжает из угла и догоняет (скорость игрока без Shift)
+		var dir: Vector3 = actors[target].global_position - node.global_position
+		dir.y = 0.0
+		if dir.length() > 1.6:
+			_move_unit_collide(node, dir.normalized(), 6.0 * delta)
+			node.rotation.y = atan2(dir.x, dir.z)
+	else:
+		# дежурство: стоит в своём углу (возвращается, если оттащили)
+		var home: Vector3 = u.get("home", node.global_position)
+		var back: = home - node.global_position
+		back.y = 0.0
+		if back.length() > 1.0:
+			_move_unit_collide(node, back.normalized(), 3.5 * delta)
+			node.rotation.y = atan2(back.x, back.z)
+		elif target >= 0 and best < sight:
+			var face: Vector3 = actors[target].global_position - node.global_position
+			node.rotation.y = atan2(face.x, face.z)
+
+	# контакт: удар клешнёй
+	if target >= 0 and u["melee_cd"] <= 0.0 and actors.has(target):
+		if node.global_position.distance_to(actors[target].global_position) < 1.9:
+			u["melee_cd"] = 1.4
+			_hurt_player(target, 1, node.global_position)
+
+	# крюк: с 50% тревоги по цели в радиусе обзора (на 100% — без ограничения)
+	if GameState.alarm >= 50.0 and target >= 0 and u["hook_cd"] <= 0.0 and actors.has(target):
+		var dist2: float = node.global_position.distance_to(actors[target].global_position)
+		var max_range: = 30.0 if GameState.alarm_phase() >= 3 else sight
+		if dist2 > 3.0 and dist2 < max_range:
+			u["hook_cd"] = rng.randf_range(5.0, 9.0)
+			u["hook_out"] = true
+			var hdir: Vector3 = (actors[target].global_position + Vector3(0, 1.0, 0)) \
+				- (node.global_position + Vector3(0, 1.6, 0))
+			var hook_uid: = _spawn_unit("HOOK", node.global_position + Vector3(0, 1.6, 0))
+			var h: Dictionary = sys_units[hook_uid]
+			h["dir"] = hdir.normalized()
+			h["owner"] = _uid_of(u)
+			h["ret"] = false
+			h["victim"] = 0
+			var msg: = "⚠ РОБОТ ВЫПУСТИЛ КРЮК — уворачивайтесь!"
+			if Net.active:
+				Net.toast_all(msg, Color(1.0, 0.5, 0.2))
+			else:
+				hud.toast(msg, Color(1.0, 0.5, 0.2))
 
 func _move_unit_collide(node: Node3D, dir: Vector3, dist: float) -> void:
 	## движение робота с коллизией: рейкаст вперёд, при упоре — скольжение вдоль
@@ -1510,12 +1503,12 @@ func _hook_tick(u: Dictionary, delta: float) -> void:
 		robot_pos = robot["node"].global_position + Vector3(0, 1.6, 0)
 	if not u["ret"]:
 		var d: Vector3 = u["dir"]
-		node.global_position += d * 5.5 * delta # крюк летит медленно — можно среагировать
+		node.global_position += d * 9.5 * delta # быстрый бросок — но увернуться можно
 		node.rotation.y = atan2(d.x, d.z)
 		# граница зала или дальность — крюк возвращается
 		var p: = node.global_position
 		if absf(p.x) > hall.x * 0.5 - 1.0 or absf(p.z) > hall.y * 0.5 - 1.0 \
-			or p.distance_to(robot_pos) > 26.0:
+			or p.distance_to(robot_pos) > 32.0:
 			u["ret"] = true
 	else:
 		var back: = robot_pos - node.global_position
@@ -1524,32 +1517,41 @@ func _hook_tick(u: Dictionary, delta: float) -> void:
 				robot["hook_out"] = false
 			_despawn_unit(_uid_of(u))
 			return
-		node.global_position += back.normalized() * 8.0 * delta
-	# поймал? мгновенный баг
-	var actors: = _all_actor_nodes()
-	for id in actors:
-		var bugged: = Net.is_bug(id) if Net.active else GameState.my_bug
-		if bugged:
-			continue
-		if node.global_position.distance_to(actors[id].global_position + Vector3(0, 1.0, 0)) < 1.1:
-			_hurt_player(id, 99, node.global_position)
-			var msg: = "☠ КРЮК ПОЙМАЛ %s — мгновенный сбой!" % Net.player_name(id)
-			if Net.active:
-				Net.toast_all(msg, Color(1.0, 0.2, 0.25))
-			else:
-				hud.toast(msg, Color(1.0, 0.2, 0.25))
-			u["ret"] = true
-			return
+		node.global_position += back.normalized() * 13.0 * delta
+	# зацепил? тянет жертву к роботу (не убивает!)
+	if int(u.get("victim", 0)) == 0:
+		var actors: = _all_actor_nodes()
+		for id in actors:
+			var bugged: = Net.is_bug(id) if Net.active else GameState.my_bug
+			if bugged or _is_hidden(id, Time.get_ticks_msec() / 1000.0):
+				continue
+			if node.global_position.distance_to(actors[id].global_position + Vector3(0, 1.0, 0)) < 1.2:
+				u["victim"] = id
+				u["ret"] = true
+				# жертва роняет груз и волочётся к роботу
+				for it in loots.values():
+					if id in it.carriers:
+						_release_item(it, id, false, Vector3.ZERO)
+				if Net.active:
+					Net.send_system_fx(id, "hooked", 1.6)
+				else:
+					_on_system_fx(id, "hooked", 1.6)
+				var msg: = "🪝 КРЮК ЗАЦЕПИЛ %s — тащит к роботу!" % Net.player_name(id)
+				if Net.active:
+					Net.toast_all(msg, Color(1.0, 0.4, 0.2))
+				else:
+					hud.toast(msg, Color(1.0, 0.4, 0.2))
+				return
 
 # ── эффекты ловушек на пирах ────────────────────────────────
 
 func _on_system_fx(target: int, kind: String, arg: float) -> void:
 	var now: = Time.get_ticks_msec() / 1000.0
-	# глобальные эффекты (target — это индекс, а не игрок)
+	# глобальные эффекты (target — это индекс/uid, а не игрок)
 	match kind:
-		"camoff":
-			if target >= 0 and target < cams.size():
-				cams[target]["off_until"] = now + arg
+		"robo_off":
+			if sys_units.has(target):
+				sys_units[target]["stun_until"] = now + arg
 			return
 		"prop_used":
 			if target >= 0 and target < hack_props.size():
@@ -1565,6 +1567,11 @@ func _on_system_fx(target: int, kind: String, arg: float) -> void:
 			return
 	var me: = target == Net.my_id()
 	match kind:
+		"hooked":
+			if me:
+				_hooked_until = now + arg
+				player.shake(0.5)
+				hud.toast("🪝 КРЮК ЗАЦЕПИЛ — тебя тянет к роботу!", Color(1.0, 0.4, 0.2))
 		"cage":
 			if me:
 				player.locked_until = now + arg
@@ -1662,7 +1669,7 @@ func _on_enemy_gone(id: int) -> void:
 			cable.queue_free()
 	sys_units.erase(id)
 
-func apply_enemy_effect(kind: String, arg: float, pos: Vector3) -> void:
+func apply_enemy_effect(kind: String, arg: float, pos: Vector3, sender: int = 1) -> void:
 	## активки против системы (только хост)
 	var now: = Time.get_ticks_msec() / 1000.0
 	match kind:
@@ -1671,6 +1678,17 @@ func apply_enemy_effect(kind: String, arg: float, pos: Vector3) -> void:
 		"decoy":
 			_decoy_until = now + arg
 			_decoy_pos = pos
+		"emp":
+			var ru: = _nearest_robot_uid(pos)
+			if ru >= 0:
+				Net.send_system_fx(ru, "robo_off", arg) if Net.active else _on_system_fx(ru, "robo_off", arg)
+		"cloak":
+			_cloaked[sender] = now + arg
+		"purge":
+			for uid in sys_units.keys():
+				var u: Dictionary = sys_units[uid]
+				if GameState.TRAPS.has(u["type"]):
+					_despawn_unit(uid)
 
 # ── портал, кулер, лут, задачи (как раньше) ─────────────────
 
@@ -1972,6 +1990,7 @@ func _on_peer_left(id: int) -> void:
 	if Net.is_server():
 		_host_hp.erase(id)
 		_marked.erase(id)
+		_cloaked.erase(id)
 		for it in loots.values():
 			if id in it.carriers:
 				_release_item(it, id, false, Vector3.ZERO)
@@ -2483,9 +2502,20 @@ func _process(delta: float) -> void:
 
 	_apply_my_carry()
 	_phase_fx_tick(delta)
-	_cams_tick(delta)
 	_units_visual_tick(delta)
 	_prop_code_tick(delta)
+	# крюк тащит меня к роботу
+	if Time.get_ticks_msec() / 1000.0 < _hooked_until and not GameState.my_bug:
+		var rp: = _nearest_robot_pos(player.global_position)
+		if rp != Vector3.INF:
+			var pull: = rp - player.global_position
+			pull.y = 0.0
+			if pull.length() < 2.0:
+				_hooked_until = 0.0
+			else:
+				var pn: = pull.normalized()
+				player.velocity.x = pn.x * 22.0
+				player.velocity.z = pn.z * 22.0
 	for sp in _spinners:
 		if is_instance_valid(sp):
 			sp.rotate_z(delta * 3.5)
@@ -2946,6 +2976,27 @@ func _use_ability(slot: int) -> void:
 		"jam":
 			GameState.add_alarm(-12.0, "wipe")
 			hud.toast("ГЛУШИЛКА: тревога −12", UIKit.VIOLET)
+		"haste":
+			player.haste_until = Time.get_ticks_msec() / 1000.0 + 5.0
+			hud.toast("СВЕРХТАКТ: +45% скорости (5с)", UIKit.TEAL)
+		"emp":
+			if remote_client:
+				Net.srv_enemy_effect.rpc_id(1, "emp", 4.0, player.global_position)
+			else:
+				apply_enemy_effect("emp", 4.0, player.global_position, Net.my_id())
+			hud.toast("ЭМИ-РАЗРЯД: ближайший робот оглушён (4с)", UIKit.VIOLET)
+		"cloak":
+			if remote_client:
+				Net.srv_enemy_effect.rpc_id(1, "cloak", 4.0, Vector3.ZERO)
+			else:
+				apply_enemy_effect("cloak", 4.0, Vector3.ZERO, Net.my_id())
+			hud.toast("СТЕЛС-ПАКЕТ: роботы тебя не видят (4с)", UIKit.CYAN)
+		"purge":
+			if remote_client:
+				Net.srv_enemy_effect.rpc_id(1, "purge", 0.0, Vector3.ZERO)
+			else:
+				apply_enemy_effect("purge", 0.0, Vector3.ZERO, Net.my_id())
+			hud.toast("ЧИСТКА: все летящие ловушки сожжены", UIKit.AMBER)
 		"heal":
 			var target: = _nearest_bug(6.0)
 			if target != 0:
