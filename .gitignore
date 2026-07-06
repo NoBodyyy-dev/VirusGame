@@ -1,2 +1,4 @@
 # Собранный exe слишком большой для GitHub (>100МБ) — играбельная сборка лежит в VirusGame.zip
 VIRUS.exe
+VIRUS.tmp
+*.tmp

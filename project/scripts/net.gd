@@ -516,6 +516,14 @@ func send_enemy_gone(id: int) -> void:
 func cl_enemy_gone(id: int) -> void:
 	enemy_gone.emit(id)
 
+@rpc("any_peer", "call_remote", "reliable")
+func srv_hack_prop(idx: int) -> void:
+	## игрок взламывает интерактивный объект (роутер/щиток)
+	if multiplayer.is_server():
+		var lvl: = get_tree().current_scene
+		if lvl != null and lvl.has_method("server_hack_prop"):
+			lvl.server_hack_prop(idx, multiplayer.get_remote_sender_id())
+
 func send_system_fx(target_id: int, kind: String, arg: float) -> void:
 	## только хост: эффект ловушки на игрока (клетка/сброс/замедление…)
 	cl_system_fx.rpc(target_id, kind, arg)

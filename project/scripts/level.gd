@@ -82,6 +82,11 @@ var _wires: Array = []        # провода-туннели [{a, b}]
 var _riding_wire: = false
 var _my_phase_seen: = 0
 var _screen_t: = 0.0
+var _spinners: Array = []     # вращающиеся вентиляторы
+var hack_props: Array = []    # интерактив взлома: терминалы/роутеры/щитки
+var _prop_hold: = 0.0
+var _my_siphoned: = {}        # какие дата-терминалы я уже слил
+var _prop_code_t: = 0.0
 
 func _ready() -> void:
 	if GameState.node_config.is_empty():
@@ -104,6 +109,8 @@ func _ready() -> void:
 	_build_cameras()
 	_spawn_player()
 	_spawn_task_stations()
+	_build_clutter()
+	_build_hack_props()
 	_build_particles()
 	_build_ui()
 	if Net.active:
@@ -546,13 +553,30 @@ func _build_terrain() -> void:
 	if _crate_spots.is_empty():
 		_crate_spots.append(Vector3(12, 0.7, 8))
 
-	# провода-туннели: вирус путешествует по кабелю [E]
+	# провода-туннели: концы ВСЕГДА у противоположных стен (не посреди зала!)
 	var wire_count: = 2 if hall.x > 76.0 else 1
+	var wire_color: = Color(0.2, 0.8, 0.95) # бирюза — чтобы не путать с опорами кабеля задач
+	var used_wire_z: Array = []
 	for w in wire_count:
-		var a: = Vector3(rng.randf_range(-hall.x * 0.5 + 10.0, -2.0), 0.0, rng.randf_range(-hz + 8.0, hz - 10.0))
-		var b: = Vector3(rng.randf_range(8.0, hall.x * 0.5 - 8.0), 0.0, rng.randf_range(-hz + 8.0, hz - 10.0))
-		if not _spot_free(a, 2.5) or not _spot_free(b, 2.5):
+		var a: = Vector3.ZERO
+		var b: = Vector3.ZERO
+		var found: = false
+		for attempt in 20:
+			var az: = rng.randf_range(-hz + 8.0, hz - 12.0)
+			var bz: = rng.randf_range(-hz + 8.0, hz - 12.0)
+			a = Vector3(-hall.x * 0.5 + rng.randf_range(4.0, 9.0), 0.0, az)
+			b = Vector3(hall.x * 0.5 - rng.randf_range(4.0, 9.0), 0.0, bz)
+			var ok: = _spot_free(a, 2.5) and _spot_free(b, 2.5)
+			for uz in used_wire_z:
+				if absf(az - uz) < 12.0 or absf(bz - uz) < 12.0:
+					ok = false
+			if ok:
+				found = true
+				break
+		if not found:
 			continue
+		used_wire_z.append(a.z)
+		used_wire_z.append(b.z)
 		_wires.append({"a": a, "b": b})
 		for endpoint in [a, b]:
 			var post: = MeshInstance3D.new()
@@ -561,13 +585,21 @@ func _build_terrain() -> void:
 			pcyl.bottom_radius = 0.34
 			pcyl.height = 1.5
 			post.mesh = pcyl
-			post.material_override = _neon_mat(Color(0.95, 0.6, 0.2), 1.4)
+			post.material_override = Mats.metal_dark(0.4)
 			post.position = endpoint + Vector3(0, 0.75, 0)
 			add_child(post)
+			var tip: = MeshInstance3D.new()
+			var tsm: = SphereMesh.new()
+			tsm.radius = 0.16
+			tsm.height = 0.32
+			tip.mesh = tsm
+			tip.material_override = _neon_mat(wire_color, 1.6)
+			tip.position = endpoint + Vector3(0, 1.6, 0)
+			add_child(tip)
 			var plbl: = Label3D.new()
 			plbl.text = "ПРОВОД [E] — переброс"
 			plbl.font_size = 22
-			plbl.modulate = Color(0.95, 0.6, 0.2)
+			plbl.modulate = wire_color
 			plbl.outline_size = 6
 			plbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 			plbl.position = endpoint + Vector3(0, 2.1, 0)
@@ -577,10 +609,251 @@ func _build_terrain() -> void:
 		for s in segs:
 			var t0: = float(s) / float(segs)
 			var t1: = float(s + 1) / float(segs)
-			var p0: = a.lerp(b, t0) + Vector3(0, 1.4 + sin(t0 * PI) * 1.6, 0)
-			var p1: = a.lerp(b, t1) + Vector3(0, 1.4 + sin(t1 * PI) * 1.6, 0)
-			var seg: = _box(Vector3(0.08, 0.08, p0.distance_to(p1)), _neon_mat(Color(0.95, 0.6, 0.2), 0.8), (p0 + p1) * 0.5)
+			var p0: = a.lerp(b, t0) + Vector3(0, 1.4 + sin(t0 * PI) * 1.8, 0)
+			var p1: = a.lerp(b, t1) + Vector3(0, 1.4 + sin(t1 * PI) * 1.8, 0)
+			var seg: = _box(Vector3(0.08, 0.08, p0.distance_to(p1)), _neon_mat(wire_color, 0.7), (p0 + p1) * 0.5)
 			seg.look_at_from_position(seg.position, p1, Vector3.UP)
+
+# ── захламление: трубы, вентиляторы, ящики, кабели ──────────
+
+func _dist_to_tasks(pos: Vector3) -> float:
+	var best: = 999.0
+	for rt in tasks_rt:
+		best = minf(best, Vector2(pos.x - rt["center"].x, pos.z - rt["center"].z).length())
+	return best
+
+func _build_clutter() -> void:
+	## рельеф и детали: уровень перестаёт быть пустой коробкой
+	var hx: = hall.x * 0.5
+	var hz: = hall.y * 0.5
+	# потолочные трубы вдоль зала с кронштейнами
+	for p in 3:
+		var pz: = rng.randf_range(-hz + 5.0, hz - 5.0)
+		var py: = rng.randf_range(6.2, 6.8)
+		var pipe: = MeshInstance3D.new()
+		var pc: = CylinderMesh.new()
+		pc.top_radius = 0.16 + 0.06 * float(p % 2)
+		pc.bottom_radius = pc.top_radius
+		pc.height = hall.x - 10.0
+		pipe.mesh = pc
+		pipe.material_override = Mats.metal(Color(0.45, 0.47, 0.5), 0.5)
+		pipe.rotation.z = deg_to_rad(90.0)
+		pipe.position = Vector3(0, py, pz)
+		add_child(pipe)
+		for br in 4:
+			_box(Vector3(0.12, 7.3 - py, 0.12), Mats.metal_dark(0.5),
+				Vector3(-hx + 8.0 + float(br) * (hall.x - 16.0) / 3.0, py + (7.3 - py) * 0.5, pz))
+	# вытяжные вентиляторы на стенах (крутятся)
+	for f in 2:
+		var side: = -1.0 if f == 0 else 1.0
+		var fx: = rng.randf_range(-hx * 0.5, hx * 0.5)
+		var froot: = Node3D.new()
+		froot.position = Vector3(fx, 4.8, side * (hz - 0.7))
+		add_child(froot)
+		var ring: = MeshInstance3D.new()
+		var tor: = TorusMesh.new()
+		tor.inner_radius = 0.75
+		tor.outer_radius = 0.95
+		ring.mesh = tor
+		ring.material_override = Mats.metal_dark(0.4)
+		ring.rotation.x = deg_to_rad(90.0)
+		froot.add_child(ring)
+		var hubroot: = Node3D.new()
+		froot.add_child(hubroot)
+		for bl in 3:
+			var blade: = _box(Vector3(0.16, 0.7, 0.04), Mats.metal(Color(0.4, 0.42, 0.46), 0.45), Vector3.ZERO, hubroot)
+			blade.position = Vector3(cos(TAU * float(bl) / 3.0) * 0.35, sin(TAU * float(bl) / 3.0) * 0.35, 0)
+			blade.rotation.z = TAU * float(bl) / 3.0
+		_spinners.append(hubroot)
+	# стопки ящиков-паллет (с коллизией — укрытия от камер)
+	for c in 6:
+		var pos: = Vector3(rng.randf_range(-hx + 7.0, hx - 7.0), 0.0, rng.randf_range(-hz + 6.0, hz - 6.0))
+		if not _spot_free(pos, 4.0) or _dist_to_tasks(pos) < 7.0:
+			continue
+		var stack: = 1 + rng.randi() % 3
+		for s in stack:
+			var sz: = 1.25 - 0.15 * float(s)
+			_solid_box(Vector3(sz, 1.0, sz), Mats.plastic(Color(0.42, 0.38, 0.3)),
+				pos + Vector3(rng.randf_range(-0.1, 0.1), 0.5 + float(s) * 1.0, rng.randf_range(-0.1, 0.1)))
+	# кабельные пучки вдоль стен
+	for side in [-1.0, 1.0]:
+		for k in 3:
+			_box(Vector3(hall.x - 8.0, 0.09, 0.09), Mats.plastic(Color(0.15, 0.16, 0.18)),
+				Vector3(0, 0.35 + float(k) * 0.14, side * (hz - 0.65 - float(k) * 0.05)))
+	# свисающие с потолка кабели
+	for k in 7:
+		var cl: = rng.randf_range(0.8, 2.4)
+		_box(Vector3(0.05, cl, 0.05), Mats.plastic(Color(0.13, 0.14, 0.16)),
+			Vector3(rng.randf_range(-hx + 6.0, hx - 6.0), 7.1 - cl * 0.5, rng.randf_range(-hz + 4.0, hz - 4.0)))
+
+# ── интерактив «реального взлома» ───────────────────────────
+
+func _build_hack_props() -> void:
+	## дата-терминалы (слить данные), роутеры (ослепить камеру),
+	## щитки (сбросить тревогу) — тактические объекты на уровне
+	var hx: = hall.x * 0.5
+	var hz: = hall.y * 0.5
+	# 3 дата-терминала по залу
+	for i in 3:
+		var pos: = Vector3.ZERO
+		for attempt in 16:
+			pos = Vector3(rng.randf_range(-hx + 8.0, hx - 8.0), 0.0, rng.randf_range(-hz + 7.0, hz - 7.0))
+			if _spot_free(pos, 3.5) and _dist_to_tasks(pos) > 8.0:
+				break
+		var root: = Node3D.new()
+		root.position = pos
+		add_child(root)
+		_box(Vector3(0.7, 1.0, 0.5), Mats.metal_dark(0.4), Vector3(0, 0.5, 0), root)
+		_collider(Vector3(0.7, 1.0, 0.5), pos + Vector3(0, 0.5, 0))
+		var scr: = _box(Vector3(0.9, 0.6, 0.06), _neon_mat(Color(0.2, 0.85, 0.4), 1.1), Vector3(0, 1.25, 0.1), root)
+		scr.rotation.x = deg_to_rad(-16.0)
+		var code: = Label3D.new()
+		code.font_size = 18
+		code.modulate = Color(0.5, 1.0, 0.6)
+		code.outline_size = 4
+		code.position = Vector3(0, 1.28, 0.16)
+		code.rotation.x = deg_to_rad(-16.0)
+		root.add_child(code)
+		var lbl: = Label3D.new()
+		lbl.text = "ДАТА-ТЕРМИНАЛ\n[E держать] слить данные"
+		lbl.font_size = 24
+		lbl.modulate = Color(0.4, 0.95, 0.55)
+		lbl.outline_size = 6
+		lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		lbl.position.y = 2.1
+		root.add_child(lbl)
+		hack_props.append({"kind": "terminal", "pos": pos, "node": root, "used": false,
+			"code": code, "screen": scr, "label": lbl})
+	# 2 роутера на боковых стенах — взлом ослепляет ближайшую камеру
+	for i in 2:
+		var side: = -1.0 if i == 0 else 1.0
+		var pos: = Vector3(side * (hx - 1.0), 0.0, rng.randf_range(-hz * 0.6, hz * 0.6))
+		var root: = Node3D.new()
+		root.position = pos
+		add_child(root)
+		_box(Vector3(0.5, 0.7, 0.9), Mats.plastic(Color(0.5, 0.52, 0.56)), Vector3(-side * 0.3, 2.5, 0), root)
+		for a2 in 2:
+			_box(Vector3(0.04, 0.5, 0.04), Mats.plastic(Color(0.2, 0.2, 0.22)), Vector3(-side * 0.3, 3.1, -0.25 + float(a2) * 0.5), root)
+		var led: = _box(Vector3(0.08, 0.08, 0.08), _neon_mat(Color(0.3, 0.9, 0.4), 1.8), Vector3(-side * 0.58, 2.6, 0.25), root)
+		var lbl: = Label3D.new()
+		lbl.text = "РОУТЕР\n[E] ослепить камеру (12с)"
+		lbl.font_size = 22
+		lbl.modulate = Color(0.4, 0.8, 1.0)
+		lbl.outline_size = 6
+		lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		lbl.position.y = 3.6
+		root.add_child(lbl)
+		hack_props.append({"kind": "router", "pos": pos, "node": root, "used": false,
+			"led": led, "label": lbl})
+	# 2 щитка предохранителей — одноразовый сброс тревоги
+	for i in 2:
+		var pos: = Vector3(rng.randf_range(-hx * 0.6, hx * 0.6), 0.0, (-1.0 if i == 0 else 1.0) * (hz - 1.0))
+		var side_z: = signf(pos.z)
+		var root: = Node3D.new()
+		root.position = pos
+		add_child(root)
+		_box(Vector3(0.8, 1.1, 0.35), Mats.metal(Color(0.6, 0.55, 0.3), 0.45), Vector3(0, 2.0, -side_z * 0.25), root)
+		_box(Vector3(0.6, 0.12, 0.1), _neon_mat(Color(0.95, 0.75, 0.15), 1.2), Vector3(0, 2.45, -side_z * 0.45), root)
+		_box(Vector3(0.1, 0.35, 0.12), Mats.plastic(Color(0.7, 0.2, 0.15)), Vector3(0.2, 1.95, -side_z * 0.45), root)
+		var lbl: = Label3D.new()
+		lbl.text = "ЩИТОК\n[E] сбить тревогу −8"
+		lbl.font_size = 22
+		lbl.modulate = Color(0.95, 0.8, 0.35)
+		lbl.outline_size = 6
+		lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		lbl.position.y = 3.3
+		root.add_child(lbl)
+		hack_props.append({"kind": "breaker", "pos": pos, "node": root, "used": false, "label": lbl})
+
+func _prop_code_tick(delta: float) -> void:
+	## бегущий hex-код на экранах дата-терминалов
+	_prop_code_t -= delta
+	if _prop_code_t > 0.0:
+		return
+	_prop_code_t = 0.35
+	var glyphs: = "0123456789ABCDEF"
+	for i in hack_props.size():
+		var hp: Dictionary = hack_props[i]
+		if hp["kind"] != "terminal":
+			continue
+		var code: Label3D = hp["code"]
+		if not is_instance_valid(code):
+			continue
+		if _my_siphoned.has(i):
+			code.text = "// СЛИТО //"
+			continue
+		var s: = ""
+		for row in 3:
+			for c in 8:
+				s += glyphs[randi() % 16]
+			if row < 2:
+				s += "\n"
+		code.text = s
+
+func _nearest_hack_prop(radius: float) -> int:
+	for i in hack_props.size():
+		var hp: Dictionary = hack_props[i]
+		if hp["used"]:
+			continue
+		if hp["kind"] == "terminal" and _my_siphoned.has(i):
+			continue
+		var p: Vector3 = hp["pos"]
+		if player.global_position.distance_to(Vector3(p.x, player.global_position.y, p.z)) < radius:
+			return i
+	return -1
+
+func server_hack_prop(idx: int, sender: int) -> void:
+	## только хост: роутер/щиток одноразовые на всю команду
+	if idx < 0 or idx >= hack_props.size():
+		return
+	var hp: Dictionary = hack_props[idx]
+	if hp["used"]:
+		return
+	match hp["kind"]:
+		"router":
+			var ci: = _nearest_cam_to(hp["pos"])
+			if ci >= 0:
+				Net.send_system_fx(ci, "camoff", 12.0) if Net.active else _on_system_fx(ci, "camoff", 12.0)
+			hp["used"] = true
+			Net.send_system_fx(idx, "prop_used", 0.0) if Net.active else _on_system_fx(idx, "prop_used", 0.0)
+			var msg: = "📡 %s взломал роутер — камера ослепла на 12с" % Net.player_name(sender)
+			if Net.active:
+				Net.toast_all(msg, Color(0.4, 0.8, 1.0))
+			else:
+				hud.toast(msg, Color(0.4, 0.8, 1.0))
+			Sfx.play("ability", -4.0, 1.3)
+		"breaker":
+			GameState.apply_alarm(-8.0, "breaker", Net.my_class_of(sender) if Net.active else GameState.display_class())
+			hp["used"] = true
+			Net.send_system_fx(idx, "prop_used", 0.0) if Net.active else _on_system_fx(idx, "prop_used", 0.0)
+			var msg2: = "⚡ %s вырубил щиток — тревога −8" % Net.player_name(sender)
+			if Net.active:
+				Net.toast_all(msg2, Color(0.95, 0.8, 0.35))
+			else:
+				hud.toast(msg2, Color(0.95, 0.8, 0.35))
+			Sfx.play("layer_done", -4.0, 0.8)
+
+func _nearest_cam_to(pos: Vector3) -> int:
+	var now: = Time.get_ticks_msec() / 1000.0
+	var best: = -1
+	var best_d: = 999.0
+	for i in cams.size():
+		if cams[i].get("off_until", 0.0) > now:
+			continue
+		var d: float = Vector3(cams[i]["pos"]).distance_to(pos)
+		if d < best_d:
+			best_d = d
+			best = i
+	return best
+
+func _siphon_terminal(idx: int) -> void:
+	## локально: каждый штамм может слить каждый терминал один раз
+	_my_siphoned[idx] = true
+	var gain: = 6 + randi() % 5
+	GameState.resources["data_fragments"] += gain
+	GameState.add_alarm(3.0, "siphon")
+	hud.toast("💾 Слив данных: +%d Data Fragments (система заметила ping)" % gain, Color(0.4, 0.95, 0.55))
+	Sfx.play("pickup", -2.0, 0.8)
 
 # ── СИСТЕМА: экран на стене ─────────────────────────────────
 
@@ -674,7 +947,7 @@ func _build_cameras() -> void:
 		cams.append({
 			"node": cam_root, "cone_mat": cmat, "pos": pos,
 			"base_yaw": face, "sweep": 0.85, "phase": rng.randf() * TAU,
-			"range": crange,
+			"range": crange, "off_until": 0.0,
 		})
 
 func _cam_dir(cam: Dictionary, t: float) -> Vector3:
@@ -686,10 +959,13 @@ func _cams_tick(_delta: float) -> void:
 	var t: = Time.get_ticks_msec() / 1000.0
 	var active: = GameState.alarm_phase() >= 1
 	for cam in cams:
-		var dir: = _cam_dir(cam, t)
 		var node: Node3D = cam["node"]
-		node.rotation.y = atan2(dir.x, dir.z)
 		var cmat: StandardMaterial3D = cam["cone_mat"]
+		if cam.get("off_until", 0.0) > t:
+			cmat.albedo_color.a = 0.0 # роутер ослепил камеру
+			continue
+		var dir: = _cam_dir(cam, t)
+		node.rotation.y = atan2(dir.x, dir.z)
 		cmat.albedo_color.a = 0.11 if active else 0.03
 		# spyware видит сектора камер ярче
 		if GameState.has_passive("spyware"):
@@ -723,6 +999,8 @@ func _detected_players() -> Array:
 			continue
 		var p: Vector3 = actors[id].global_position
 		for cam in cams:
+			if cam.get("off_until", 0.0) > t:
+				continue # камера ослеплена роутером
 			var cpos: Vector3 = cam["pos"]
 			var flat: = Vector3(p.x - cpos.x, 0.0, p.z - cpos.z)
 			if flat.length() > cam["range"]:
@@ -1179,8 +1457,8 @@ func _robot_tick(u: Dictionary, delta: float) -> void:
 	dir.y = 0.0
 	var dist: = dir.length()
 	if dist > 1.6:
-		# скорость робота = скорость игрока без спринта
-		node.global_position += dir.normalized() * 6.0 * delta
+		# скорость робота = скорость игрока без спринта; препятствия объезжает
+		_move_unit_collide(node, dir.normalized(), 6.0 * delta)
 		node.rotation.y = atan2(dir.x, dir.z)
 	else:
 		_hurt_player(target, 1, node.global_position)
@@ -1199,6 +1477,27 @@ func _robot_tick(u: Dictionary, delta: float) -> void:
 			Net.toast_all(msg, Color(1.0, 0.5, 0.2))
 		else:
 			hud.toast(msg, Color(1.0, 0.5, 0.2))
+
+func _move_unit_collide(node: Node3D, dir: Vector3, dist: float) -> void:
+	## движение робота с коллизией: рейкаст вперёд, при упоре — скольжение вдоль
+	var space: = get_world_3d().direct_space_state
+	var from: = node.global_position + Vector3(0, 1.0, 0)
+	var q: = PhysicsRayQueryParameters3D.create(from, from + dir * (dist + 1.1))
+	q.collision_mask = 1
+	var hit: = space.intersect_ray(q)
+	if hit.is_empty():
+		node.global_position += dir * dist
+		return
+	var n: Vector3 = hit["normal"]
+	var slide: = dir - n * dir.dot(n)
+	slide.y = 0.0
+	if slide.length() < 0.05:
+		return
+	slide = slide.normalized()
+	var q2: = PhysicsRayQueryParameters3D.create(from, from + slide * (dist + 1.1))
+	q2.collision_mask = 1
+	if space.intersect_ray(q2).is_empty():
+		node.global_position += slide * dist
 
 func _hook_tick(u: Dictionary, delta: float) -> void:
 	var node: Node3D = u["node"]
@@ -1246,6 +1545,24 @@ func _hook_tick(u: Dictionary, delta: float) -> void:
 
 func _on_system_fx(target: int, kind: String, arg: float) -> void:
 	var now: = Time.get_ticks_msec() / 1000.0
+	# глобальные эффекты (target — это индекс, а не игрок)
+	match kind:
+		"camoff":
+			if target >= 0 and target < cams.size():
+				cams[target]["off_until"] = now + arg
+			return
+		"prop_used":
+			if target >= 0 and target < hack_props.size():
+				var hp: Dictionary = hack_props[target]
+				hp["used"] = true
+				var lbl: Label3D = hp.get("label", null)
+				if lbl != null and is_instance_valid(lbl):
+					lbl.text = lbl.text.get_slice("\n", 0) + "\n// ИСПОЛЬЗОВАН //"
+					lbl.modulate = Color(0.45, 0.5, 0.55)
+				var led: MeshInstance3D = hp.get("led", null)
+				if led != null and is_instance_valid(led):
+					led.material_override = _neon_mat(Color(0.4, 0.42, 0.45), 0.4)
+			return
 	var me: = target == Net.my_id()
 	match kind:
 		"cage":
@@ -2168,6 +2485,10 @@ func _process(delta: float) -> void:
 	_phase_fx_tick(delta)
 	_cams_tick(delta)
 	_units_visual_tick(delta)
+	_prop_code_tick(delta)
+	for sp in _spinners:
+		if is_instance_valid(sp):
+			sp.rotate_z(delta * 3.5)
 	_screen_t -= delta
 	if _screen_t <= 0.0:
 		_screen_t = 0.25
@@ -2454,6 +2775,9 @@ func _handle_interactions(delta: float) -> void:
 	else:
 		var it: = _nearest_free_loot(2.7)
 		var wire: = _nearest_wire()
+		var prop_i: = _nearest_hack_prop(2.6)
+		if prop_i < 0 or (prop_i >= 0 and hack_props[prop_i]["kind"] != "terminal"):
+			_prop_hold = 0.0
 		if it != null:
 			if it.weight > 1 and not it.carriers.is_empty():
 				prompt = "[E] подхватить «%s» — вдвоём быстрее (%d/%d)" % [it.loot_name, it.carriers.size() + 1, it.weight]
@@ -2463,6 +2787,23 @@ func _handle_interactions(delta: float) -> void:
 				prompt = "[E] схватить «%s» (◈ %d)" % [it.loot_name, roundi(it.value)]
 		elif sync_at[0] >= 0:
 			prompt = "[E держать] рычаг рубильника (нужны ОБА рычага сразу)"
+		elif prop_i >= 0:
+			var hp: Dictionary = hack_props[prop_i]
+			match hp["kind"]:
+				"terminal":
+					if Input.is_action_pressed("interact"):
+						_prop_hold += delta
+						prompt = "взлом терминала… %d%%" % int(_prop_hold / 2.0 * 100.0)
+						if _prop_hold >= 2.0:
+							_prop_hold = 0.0
+							_siphon_terminal(prop_i)
+					else:
+						_prop_hold = 0.0
+						prompt = "[E держать] ДАТА-ТЕРМИНАЛ: слить данные (+◈, шумит)"
+				"router":
+					prompt = "[E] РОУТЕР: ослепить ближайшую камеру на 12с"
+				"breaker":
+					prompt = "[E] ЩИТОК: аварийный сброс тревоги −8 (одноразово)"
 		elif not wire.is_empty():
 			prompt = "[E] нырнуть в провод — переброс на ту сторону"
 		elif cooler_charges > 0 and player.global_position.distance_to(cooler_pos) < 2.8:
@@ -2491,9 +2832,16 @@ func _handle_interactions(delta: float) -> void:
 			if it != null:
 				_request_grab(it)
 			else:
-				var wire: = _nearest_wire()
-				if not wire.is_empty() and sync_at[0] < 0:
-					_ride_wire(wire["from"], wire["to"])
+				var prop_i2: = _nearest_hack_prop(2.6)
+				if prop_i2 >= 0 and hack_props[prop_i2]["kind"] != "terminal" and sync_at[0] < 0:
+					if Net.active and not Net.is_server():
+						Net.srv_hack_prop.rpc_id(1, prop_i2)
+					else:
+						server_hack_prop(prop_i2, Net.my_id())
+				else:
+					var wire: = _nearest_wire()
+					if not wire.is_empty() and sync_at[0] < 0:
+						_ride_wire(wire["from"], wire["to"])
 
 func _my_strength() -> int:
 	return 2 if GameState.has_passive("ransomware") else 1
