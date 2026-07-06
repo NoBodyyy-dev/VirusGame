@@ -1,8 +1,9 @@
 class_name VirusPlayer
 extends CharacterBody3D
 
-## Контроллер штамма: инерция, прыжок с койот-таймом, спринт с FOV,
-## переноска лута, псевдо-рэгдолл, режим «бага», морф трояна.
+## Контроллер штамма ОТ ПЕРВОГО ЛИЦА: инерция, прыжок с койот-таймом,
+## спринт с FOV, переноска лута, стан, режим «бага», морф трояна,
+## эффекты ловушек системы (клетка/замедление).
 
 const GRAVITY: = 26.0
 const JUMP_VELOCITY: = 9.5
@@ -19,13 +20,14 @@ var sprint_speed: = 9.2
 var demo_target: = Vector3.INF
 var invert_until: = 0.0     # подлянка «зеркало»
 var shrink_until: = 0.0     # подлянка «сжатие»
+var locked_until: = 0.0     # клетка/перепрошивка: движение запрещено
+var slow_until: = 0.0       # перепрошивка: замедление
 var carry_factor: = 1.0     # штраф скорости от груза (ставит level)
 var carrying: = false       # несёт лут (ставит level)
 var is_bug: = false         # 0 HP: пищащий баг
 var morphed: = false        # троян прикинулся ящиком
 
 var yaw_pivot: Node3D
-var spring: SpringArm3D
 var camera: Camera3D
 var model: VirusModel
 var _bug_model: Node3D
@@ -33,7 +35,7 @@ var _crate_model: Node3D
 var _coyote: = 0.0
 var _jump_buffer: = 0.0
 var _was_on_floor: = true
-var _base_fov: = 68.0
+var _base_fov: = 75.0
 var _shake: = 0.0
 var _net_timer: = 0.0
 var _stun_t: = 0.0
@@ -65,6 +67,7 @@ func _build_body() -> void:
 
 	var cls_color: Color = GameState.class_info()["color"]
 	model = VirusModel.create(GameState.display_class(), cls_color, GameState.virus_level, GameState.display_secondary())
+	model.visible = false # от первого лица своё тело не видно (другие видят аватар)
 	add_child(model)
 
 	var light: = OmniLight3D.new()
@@ -75,24 +78,23 @@ func _build_body() -> void:
 	add_child(light)
 
 func _build_camera() -> void:
+	# от первого лица: камера в «голове» штамма
 	yaw_pivot = Node3D.new()
-	yaw_pivot.position.y = 1.5
+	yaw_pivot.position.y = 1.55
 	add_child(yaw_pivot)
-	spring = SpringArm3D.new()
-	spring.spring_length = 5.2
-	spring.margin = 0.3
-	spring.rotation.x = deg_to_rad(-16.0)
-	spring.add_excluded_object(get_rid())
-	yaw_pivot.add_child(spring)
 	camera = Camera3D.new()
 	camera.fov = _base_fov
+	camera.near = 0.08
 	camera.current = true
-	spring.add_child(camera)
+	yaw_pivot.add_child(camera)
+
+func locked() -> bool:
+	return Time.get_ticks_msec() / 1000.0 < locked_until
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		yaw_pivot.rotate_y(-event.relative.x * MOUSE_SENS)
-		spring.rotation.x = clampf(spring.rotation.x - event.relative.y * MOUSE_SENS, deg_to_rad(-65.0), deg_to_rad(18.0))
+		camera.rotation.x = clampf(camera.rotation.x - event.relative.y * MOUSE_SENS, deg_to_rad(-82.0), deg_to_rad(82.0))
 
 func shake(power: = 0.35) -> void:
 	_shake = maxf(_shake, power)
@@ -123,7 +125,7 @@ func _physics_process(delta: float) -> void:
 			_land()
 	_was_on_floor = on_floor
 
-	var can_control: = control_enabled and not stunned
+	var can_control: = control_enabled and not stunned and not locked()
 	_jump_buffer = maxf(_jump_buffer - delta, 0.0)
 	if can_control and not carrying and not is_bug and Input.is_action_just_pressed("jump"):
 		_jump_buffer = JUMP_BUFFER
@@ -156,6 +158,8 @@ func _physics_process(delta: float) -> void:
 
 	var sprinting: = Input.is_action_pressed("sprint") and can_control and not is_bug
 	var speed: = (sprint_speed if sprinting else base_speed) * carry_factor
+	if Time.get_ticks_msec() / 1000.0 < slow_until:
+		speed *= 0.5 # перепрошивка: ноги вязнут в чужом коде
 	if is_bug:
 		speed = BUG_SPEED
 	var accel: = ACCEL_GROUND if on_floor else ACCEL_AIR
@@ -256,31 +260,17 @@ func set_bug(on: bool) -> void:
 	carrying = false
 	carry_factor = 1.0
 	morphed = false
-	if model:
-		model.visible = not on
 	if on:
-		if _bug_model == null:
-			_bug_model = VirusModel.create_bug(GameState.class_info()["color"])
-			add_child(_bug_model)
-		_bug_model.visible = true
+		# от первого лица своя тушка не видна — только писк и HUD
 		Sfx.play("trap", -2.0, 1.6)
-	elif _bug_model != null:
-		_bug_model.visible = false
+	else:
 		Sfx.play("ability", -2.0, 1.3)
 
 # ── морф трояна ─────────────────────────────────────────────
 
 func set_morph(on: bool) -> void:
+	## от первого лица ящик видят только другие (через аватар)
 	morphed = on
-	if model:
-		model.visible = not on
-	if on:
-		if _crate_model == null:
-			_crate_model = VirusModel.create_crate()
-			add_child(_crate_model)
-		_crate_model.visible = true
-	elif _crate_model != null:
-		_crate_model.visible = false
 
 func _unmorph_if_needed() -> void:
 	if morphed:

@@ -24,6 +24,8 @@ signal enemies_tf(batch: Array)
 signal enemy_fx(id: int, kind: String)
 signal task_state(batch: Array)
 signal task_done(idx: int, participants: Array)
+signal system_fx(target_id: int, kind: String, arg: float)
+signal enemy_gone(id: int)
 signal net_toast(text: String, color: Color)
 signal peer_left(id: int)
 signal emote_shown(id: int, idx: int)
@@ -504,6 +506,24 @@ func send_enemies(batch: Array) -> void:
 @rpc("authority", "call_remote", "unreliable_ordered")
 func cl_enemies(batch: Array) -> void:
 	enemies_tf.emit(batch)
+
+func send_enemy_gone(id: int) -> void:
+	## только хост: ловушка/юнит системы исчез
+	cl_enemy_gone.rpc(id)
+	enemy_gone.emit(id)
+
+@rpc("authority", "call_remote", "reliable")
+func cl_enemy_gone(id: int) -> void:
+	enemy_gone.emit(id)
+
+func send_system_fx(target_id: int, kind: String, arg: float) -> void:
+	## только хост: эффект ловушки на игрока (клетка/сброс/замедление…)
+	cl_system_fx.rpc(target_id, kind, arg)
+	system_fx.emit(target_id, kind, arg)
+
+@rpc("authority", "call_remote", "reliable")
+func cl_system_fx(target_id: int, kind: String, arg: float) -> void:
+	system_fx.emit(target_id, kind, arg)
 
 func send_enemy_fx(id: int, kind: String) -> void:
 	cl_enemy_fx.rpc(id, kind)

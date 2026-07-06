@@ -70,6 +70,26 @@ func _build_console() -> void:
 	screen.rotation.x = deg_to_rad(-12.0)
 	add_child(screen)
 
+	# рычаг рубильника — за него и «держат» [E]
+	var lever: = MeshInstance3D.new()
+	var lmesh: = CylinderMesh.new()
+	lmesh.top_radius = 0.05
+	lmesh.bottom_radius = 0.05
+	lmesh.height = 0.7
+	lever.mesh = lmesh
+	lever.material_override = _neon(color, 2.2)
+	lever.rotation.z = deg_to_rad(35.0)
+	lever.position = Vector3(0.35, 1.25, 0.25)
+	add_child(lever)
+	var knob: = MeshInstance3D.new()
+	var kmesh: = SphereMesh.new()
+	kmesh.radius = 0.11
+	kmesh.height = 0.22
+	knob.mesh = kmesh
+	knob.material_override = _neon(Color(1.0, 0.4, 0.3), 2.6)
+	knob.position = Vector3(0.55, 1.53, 0.25)
+	add_child(knob)
+
 	light = OmniLight3D.new()
 	light.light_color = color
 	light.light_energy = 1.8

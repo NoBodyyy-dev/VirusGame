@@ -21,42 +21,49 @@ const CLASSES: = {
 	"base": {
 		"name": "ПРОТО-ШТАММ", "role": "Болванка без специализации", "color": Color("9ab8c8"),
 		"passive": "Все начинают одинаково. Ветку развития выбирают в дереве эволюции [Tab]",
-		"active": "—", "cost": 0,
+		"active": "—", "cost": 0, "attrs": {"str": 4, "dex": 4, "int": 4},
 	},
 	"trojan": {
 		"name": "ТРОЯН", "role": "Мимик / диверсант", "color": Color("35e0ff"),
-		"passive": "Мимикрия: активка превращает его в ящик — враги слепы, пока он не двинется",
+		"passive": "Мимикрия: активка превращает его в ящик — камеры его не видят, пока он не двинется",
 		"active": "Ложный файл — стать ящиком (до первого движения)", "cost": 20,
+		"attrs": {"str": 4, "dex": 7, "int": 9},
 	},
 	"worm": {
 		"name": "ЧЕРВЬ", "role": "Спринтер / курьер", "color": Color("38f0a8"),
 		"passive": "Самый быстрый штамм; штраф от груза меньше",
 		"active": "Рывок — бросок вперёд (работает даже с грузом)", "cost": 15,
+		"attrs": {"str": 3, "dex": 10, "int": 5},
 	},
 	"ransomware": {
 		"name": "RANSOMWARE", "role": "Силач / танк", "color": Color("ff3d6e"),
 		"passive": "Тяжёлый лут тащит В ОДИНОЧКУ; +1 HP",
-		"active": "Шифрование — заморозка ВСЕХ стражей на 3с", "cost": 35,
+		"active": "Шифрование — заморозка всех ловушек и робота на 3с", "cost": 35,
+		"attrs": {"str": 10, "dex": 3, "int": 6},
 	},
 	"spyware": {
 		"name": "SPYWARE", "role": "Разведчик / глаза", "color": Color("ffb454"),
-		"passive": "Полный бриф узла до старта",
-		"active": "Скан — лут и стражи видны сквозь стены (6с) всем", "cost": 20,
+		"passive": "Видит сектора обзора камер и полную сводку системы",
+		"active": "Скан — лут и угрозы видны сквозь стены (6с) всем", "cost": 20,
+		"attrs": {"str": 3, "dex": 6, "int": 10},
 	},
 	"adware": {
 		"name": "ADWARE", "role": "Дезинформация", "color": Color("a8d84f"),
-		"passive": "Попап-воришки боятся его и бросают украденное",
-		"active": "Фантом — приманка уводит стражей (5с)", "cost": 25,
+		"passive": "Ловушки иногда ведутся на его фантомный след и промахиваются",
+		"active": "Фантом — приманка уводит ловушки (5с)", "cost": 25,
+		"attrs": {"str": 4, "dex": 6, "int": 8},
 	},
 	"rootkit": {
 		"name": "ROOTKIT", "role": "Тихоня / сапёр", "color": Color("8b5cff"),
 		"passive": "Бесшумный: его бег, прыжки и броски не поднимают тревогу",
 		"active": "Глушилка — тревога −12", "cost": 30,
+		"attrs": {"str": 5, "dex": 8, "int": 7},
 	},
 	"botnet": {
-		"name": "BOTNET", "role": "Медик роя", "color": Color("4a90ff"),
-		"passive": "Bandwidth 150 и двойная регенерация",
+		"name": "BOTNET", "role": "Оператор роя / медик", "color": Color("4a90ff"),
+		"passive": "Bandwidth 150, двойная регенерация. Настраивает ВСПОМОГАТЕЛЬНЫЙ ВЗЛОМ: взломанные серверы зоны помогают вдвое сильнее",
 		"active": "Дефибрилляция — оживить «бага» рядом (или +1 HP себе)", "cost": 40,
+		"attrs": {"str": 6, "dex": 4, "int": 9},
 	},
 }
 
@@ -104,14 +111,24 @@ const LEVELS: = [
 
 const APEX_COST_MULT: = 1.5   # УР.3: навыки мощнее — «мана» дороже
 
-# ── полевые кооп-задачи (вместо мини-игр) ───────────────────
+# ── полевые кооп-задачи (интерактив в мире) ─────────────────
 const TASKS: = {
-	"sync": {"title": "СИНХРО-ВЗЛОМ", "icon": "⇄",
-		"desc": "две консоли: держите [E] у ОБЕИХ одновременно (вдвоём — легко, одному — мучение)"},
-	"zone": {"title": "ЗАХВАТ СЕКТОРА", "icon": "◎",
-		"desc": "стойте в зоне: чем больше штаммов внутри, тем быстрее захват"},
-	"relay": {"title": "ЦЕПЬ РЕЛЕ", "icon": "⚡",
-		"desc": "коснитесь реле по порядку, пока цепь не остыла — делите маршрут на команду"},
+	"sync": {"title": "ДВОЙНОЙ РУБИЛЬНИК", "icon": "⇄",
+		"desc": "два рычага: держите [E] на ОБОИХ одновременно (вдвоём — легко, одному — мучение)"},
+	"zone": {"title": "УСТАНОВКА МОДУЛЕЙ", "icon": "◎",
+		"desc": "стойте в зоне монтажа: чем больше штаммов, тем быстрее вставляются модули взлома"},
+	"relay": {"title": "ПРОТЯЖКА КАБЕЛЯ", "icon": "⚡",
+		"desc": "дотяните кабель по опорам по порядку, пока линия не остыла — делите маршрут"},
+}
+
+# ── ловушки системы (вылетают из стен) ──────────────────────
+const TRAPS: = {
+	"laser": {"name": "ТОЧЕЧНЫЙ ЛАЗЕР", "tier": 0, "speed": 8.5, "life": 12.0, "color": Color(1.0, 0.25, 0.3)},
+	"cage": {"name": "КЛЕТКА", "tier": 1, "speed": 6.0, "life": 10.0, "color": Color(0.5, 0.75, 1.0)},
+	"reset": {"name": "СБРОС ДО НУЛЯ", "tier": 1, "speed": 6.5, "life": 10.0, "color": Color(0.7, 0.7, 0.75)},
+	"pull": {"name": "ПРИТЯЖЕНИЕ", "tier": 1, "speed": 7.0, "life": 10.0, "color": Color(0.9, 0.5, 1.0)},
+	"mark": {"name": "МЕТКА", "tier": 2, "speed": 7.0, "life": 10.0, "color": Color(1.0, 0.85, 0.3)},
+	"reflash": {"name": "ПАТРОН С ПЕРЕПРОШИВКОЙ", "tier": 3, "speed": 5.5, "life": 14.0, "color": Color(0.3, 1.0, 0.6)},
 }
 
 # ── лут: физические предметы ────────────────────────────────
@@ -136,17 +153,25 @@ const LOOT_NAMES_EPIC: = [
 	"ЗОЛОТОЙ БИТКОИН", "ИСХОДНИКИ WINDOWS", "КЛЮЧИ ОТ ВСЕГО.pem", "НУЛЕВОЙ ПАЦИЕНТ.iso",
 ]
 
-# ── тиры узлов: выше тир — больше стражей и защиты ──────────
+# ── тиры узлов: выше тир — чувствительнее СИСТЕМА ───────────
+## T0 — обучающий: тревога ползёт еле-еле, ловушек почти нет
 const TIERS: = [
-	{"name": "Домашний ПК", "short": "T1", "av": "DEFENDER", "color": Color("35e0ff"), "theme": "home",
-		"quota": 60, "creep": 0.28, "files": 7, "crates": 2, "tasks": 1, "popups": 1, "hunters": 1, "scanners": 1},
-	{"name": "Офисная сеть", "short": "T2", "av": "BEHAVIORAL", "color": Color("ffb454"), "theme": "office",
-		"quota": 80, "creep": 0.34, "files": 8, "crates": 3, "tasks": 2, "popups": 1, "hunters": 1, "scanners": 2},
-	{"name": "Банк / IoT", "short": "T3", "av": "SANDBOX", "color": Color("ff5d8f"), "theme": "bank",
-		"quota": 100, "creep": 0.4, "files": 9, "crates": 3, "tasks": 2, "popups": 2, "hunters": 2, "scanners": 3},
-	{"name": "Дата-центр", "short": "T4", "av": "AIR-GAPPED", "color": Color("8b5cff"), "theme": "dc",
-		"quota": 115, "creep": 0.46, "files": 10, "crates": 4, "tasks": 3, "popups": 2, "hunters": 2, "scanners": 4},
+	{"name": "Незащищённые ПК", "short": "T0", "av": "WATCHDOG-LITE", "color": Color("35e0ff"), "theme": "home",
+		"quota": 40, "creep": 0.06, "files": 6, "crates": 1, "tasks": 1,
+		"sensitivity": 1, "trap_interval": 18.0, "cam_range": 10.0, "traps": ["laser"]},
+	{"name": "Защищённые ПК и лавки", "short": "T1", "av": "BEHAVIORAL", "color": Color("ffb454"), "theme": "office",
+		"quota": 70, "creep": 0.22, "files": 8, "crates": 2, "tasks": 2,
+		"sensitivity": 2, "trap_interval": 12.0, "cam_range": 13.0, "traps": ["laser", "cage", "reset", "pull"]},
+	{"name": "Дата-центры", "short": "T2", "av": "SANDBOX", "color": Color("ff5d8f"), "theme": "dc",
+		"quota": 95, "creep": 0.3, "files": 9, "crates": 3, "tasks": 2,
+		"sensitivity": 3, "trap_interval": 9.0, "cam_range": 15.0, "traps": ["laser", "cage", "reset", "pull", "mark"]},
+	{"name": "Военные сети", "short": "T3", "av": "AIR-GAPPED", "color": Color("8b5cff"), "theme": "bank",
+		"quota": 115, "creep": 0.38, "files": 10, "crates": 4, "tasks": 3,
+		"sensitivity": 4, "trap_interval": 7.0, "cam_range": 17.0, "traps": ["laser", "cage", "reset", "pull", "mark", "reflash"]},
 ]
+
+## серверов на зону Грида: T0 → T3, затем босс ПЕНТАГОН
+const ZONES: = [3, 12, 25, 39]
 
 # ── прогрессия игрока (дерево эволюции) ─────────────────────
 var branch: = ""              # выбранная ветка ("" = ещё не выбрана)
@@ -157,6 +182,9 @@ var career: = {"deposits": 0, "delivered": 0, "tasks": 0, "raids": 0}
 
 var resources: = {"data_fragments": 0, "code_samples": 0, "mutagen": 0, "ghost_tokens": 0}
 var grid_nodes: Array = []
+var grid_zones: Array = []   # [{tier, z0, z1, half, count}] — комнаты Грида
+var reset_until: = 0.0       # ловушка «сброс до нуля»: скин временно базовый
+var stolen_abilities: Array = []   # украдено перепрошивкой (вернутся после рейда)
 var grid_heat: = 0.0
 var current_node: Dictionary = {}
 var last_result: Dictionary = {}
@@ -194,7 +222,9 @@ func _process(delta: float) -> void:
 # ── идентичность штамма ─────────────────────────────────────
 
 func display_class() -> String:
-	## скин ветки появляется только с УР.1
+	## скин ветки появляется только с УР.1; «сброс до нуля» временно оголяет
+	if Time.get_ticks_msec() / 1000.0 < reset_until:
+		return "base"
 	return branch if branch != "" and virus_level >= 1 else "base"
 
 func display_secondary() -> String:
@@ -307,6 +337,23 @@ func ability_cost(id: String) -> float:
 	var base: = float(ABILITIES[id]["cost"])
 	return base * (APEX_COST_MULT if virus_level >= 3 else 1.0)
 
+func steal_ability() -> String:
+	## перепрошивка: крадёт умение (глубина 1 — 80%, 2 — 18%, 3 — 2%)
+	if active_abilities.is_empty():
+		return ""
+	var r: = randf()
+	var idx: = 0
+	if r >= 0.98:
+		idx = 2
+	elif r >= 0.80:
+		idx = 1
+	idx = mini(idx, active_abilities.size() - 1)
+	var id: String = active_abilities[idx]
+	active_abilities.remove_at(idx)
+	stolen_abilities.append(id)
+	evolution_changed.emit()
+	return id
+
 # ── базовые навыки растут с уровнем ─────────────────────────
 
 func evo_bonus(id: String) -> float:
@@ -335,6 +382,8 @@ func new_campaign() -> void:
 		branch = debug_class
 		virus_level = 1
 		active_abilities = [BRANCH_ABILITIES[debug_class][0]]
+	stolen_abilities = []
+	reset_until = 0.0
 	career = {"deposits": 0, "delivered": 0, "tasks": 0, "raids": 0}
 	resources = {"data_fragments": 0, "code_samples": 0, "mutagen": 0, "ghost_tokens": 0}
 	grid_heat = 0.0
@@ -345,34 +394,50 @@ func new_campaign() -> void:
 	evolution_changed.emit()
 
 func _generate_grid() -> void:
-	## линейная цепочка развития: T1 → T1 → T2 → T2 → T3 → T3 → T4 → БОСС
+	## Грид — анфилада зон-комнат: T0(3) → T1(12) → T2(25) → T3(39) → ПЕНТАГОН.
+	## Проход в следующую зону открывается, когда взломаны ВСЕ серверы текущей.
 	grid_nodes.clear()
-	var chain: = [0, 0, 1, 1, 2, 2, 3]
-	var pos: = Vector3.ZERO
-	var heading: = 0.0   # цепочка уходит на -Z, змейкой
+	grid_zones.clear()
 	var id: = 0
-	for tier in chain:
-		if id > 0:
-			heading = clampf(heading + randf_range(-0.6, 0.6), -0.9, 0.9)
-			var step: = 30.0 + 4.0 * float(tier)
-			pos = pos + Vector3(sin(heading) * step, 0.0, -cos(heading) * step)
-		grid_nodes.append({
-			"id": id, "tier": tier, "boss": false, "pos": pos,
-			"name": "%s-%02d" % [_tier_prefix(tier), id],
-			"av": TIERS[tier]["av"], "infected": false, "failed": false,
-			"seed": randi(),
-		})
-		id += 1
-	heading = clampf(heading + randf_range(-0.3, 0.3), -0.9, 0.9)
-	pos = pos + Vector3(sin(heading) * 46.0, 0.0, -cos(heading) * 46.0)
+	var z_cursor: = 30.0   # вход; зоны уходят в -Z
+	for zi in ZONES.size():
+		var count: int = ZONES[zi]
+		var cols: = int(ceil(sqrt(float(count) * 1.6)))
+		var rows: = int(ceil(float(count) / float(cols)))
+		var spacing: = 17.0
+		var half: = maxf(38.0, float(cols) * spacing * 0.5 + 14.0)
+		var length: = float(rows) * spacing + 42.0
+		var z0: = z_cursor
+		var placed: = 0
+		for r in rows:
+			for c in cols:
+				if placed >= count:
+					break
+				var x: = (float(c) - float(cols - 1) * 0.5) * spacing + randf_range(-2.0, 2.0)
+				var z: = z0 - 26.0 - float(r) * spacing + randf_range(-2.0, 2.0)
+				grid_nodes.append({
+					"id": id, "zone": zi, "tier": zi, "boss": false,
+					"pos": Vector3(x, 0.0, z),
+					"name": "%s-%02d" % [_tier_prefix(zi), id],
+					"av": TIERS[zi]["av"], "infected": false, "failed": false,
+					"seed": randi(),
+				})
+				placed += 1
+				id += 1
+		grid_zones.append({"tier": zi, "z0": z0, "z1": z0 - length, "half": half, "count": count})
+		z_cursor = z0 - length
+	# финальная зона — ПЕНТАГОН
+	var bz0: = z_cursor
 	grid_nodes.append({
-		"id": id, "tier": 3, "boss": true, "pos": pos,
-		"name": "ОРАКУЛ", "av": "HEURISTIC AI", "infected": false, "failed": false,
+		"id": id, "zone": ZONES.size(), "tier": 3, "boss": true,
+		"pos": Vector3(0.0, 0.0, bz0 - 46.0),
+		"name": "ПЕНТАГОН", "av": "SENTINEL-X", "infected": false, "failed": false,
 		"seed": randi(),
 	})
+	grid_zones.append({"tier": 3, "z0": bz0, "z1": bz0 - 84.0, "half": 46.0, "count": 1})
 
 func _tier_prefix(tier: int) -> String:
-	return ["HOME", "OFFICE", "BANK", "DCENTER"][tier]
+	return ["PC", "SHOP", "DC", "MIL"][tier]
 
 func total_nodes() -> int:
 	return grid_nodes.size()
@@ -384,27 +449,60 @@ func infected_total() -> int:
 			c += 1
 	return c
 
+# ── зоны ────────────────────────────────────────────────────
+
+func zone_total(z: int) -> int:
+	if z < 0 or z >= grid_zones.size():
+		return 0
+	return grid_zones[z]["count"]
+
+func zone_infected(z: int) -> int:
+	var c: = 0
+	for node in grid_nodes:
+		if node["zone"] == z and node["infected"]:
+			c += 1
+	return c
+
+func zone_complete(z: int) -> bool:
+	return zone_infected(z) >= zone_total(z)
+
+func zone_open(z: int) -> bool:
+	return z == 0 or zone_complete(z - 1)
+
+func frontier_zone() -> int:
+	## первая незавершённая зона — дальше территория закрыта
+	for z in grid_zones.size():
+		if not zone_complete(z):
+			return z
+	return grid_zones.size() - 1
+
 func node_unlocked(node: Dictionary) -> bool:
-	## строгий порядок: следующий узел открывается после захвата предыдущего
-	var idx: int = node["id"]
-	if idx == 0:
-		return true
-	if idx - 1 >= grid_nodes.size():
-		return false
-	return grid_nodes[idx - 1]["infected"]
+	return zone_open(node["zone"])
 
 func node_lock_reason(node: Dictionary) -> String:
-	var idx: int = node["id"]
-	if idx <= 0 or idx - 1 >= grid_nodes.size():
+	var z: int = node["zone"]
+	if z <= 0:
 		return ""
-	return "сначала захватите %s" % grid_nodes[idx - 1]["name"]
+	return "взломайте все серверы зоны %d (%d/%d)" % [z - 1, zone_infected(z - 1), zone_total(z - 1)]
 
-func frontier_index() -> int:
-	## id первого незаражённого узла — граница освоенной территории
-	for node in grid_nodes:
-		if not node["infected"]:
-			return node["id"]
-	return grid_nodes.size()
+# ── вспомогательный взлом (T2+): рой уже взломанных серверов ─
+
+func team_has(cls: String) -> bool:
+	if not Net.active:
+		return has_passive(cls)
+	for id in Net.players:
+		if Net.my_class_of(id) == cls:
+			return true
+	return false
+
+func assist_ratio(node: Dictionary) -> float:
+	## каждый взломанный сервер зоны облегчает остальные; BOTNET удваивает
+	if node.get("boss", false):
+		return 0.0
+	if int(node["tier"]) < 2:
+		return 0.0
+	var per: = 0.03 if team_has("botnet") else 0.015
+	return minf(float(zone_infected(node["zone"])) * per, 0.45)
 
 # ── взлом узла ──────────────────────────────────────────────
 
@@ -421,6 +519,7 @@ func start_hack(node: Dictionary) -> void:
 	evac_open = false
 	evac_left = 0.0
 	wipe_forced = false
+	reset_until = 0.0
 	stats = {"delivered": 0, "deposits": 0, "broken": 0, "revives": 0, "caught": 0, "tasks": 0, "fails": 0}
 	node_config = _build_node_config(node)
 
@@ -431,19 +530,26 @@ func _build_node_config(node: Dictionary) -> Dictionary:
 	var files: int = t["files"]
 	var crates: int = t["crates"]
 	var task_count: int = t["tasks"]
-	var popups: int = t["popups"]
-	var hunters: int = t["hunters"]
-	var scanners: int = t["scanners"]
 	var creep: float = t["creep"]
+	var sensitivity: int = t["sensitivity"]
+	var trap_interval: float = t["trap_interval"]
+	var cam_range: float = t["cam_range"]
+	var traps: Array = t["traps"]
 	if node["boss"]:
-		quota = 150
-		files = 11
-		crates = 5
+		# ПЕНТАГОН: бой рассчитан примерно на 10 минут
+		quota = 260
+		files = 16
+		crates = 6
 		task_count = 3
-		popups = 2
-		hunters = 3
-		scanners = 5
-		creep = 0.5
+		creep = 0.3
+		sensitivity = 6
+		trap_interval = 5.0
+		cam_range = 20.0
+		traps = TRAPS.keys()
+	# вспомогательный взлом: рой взломанных серверов зоны давит на систему
+	var assist: = assist_ratio(node)
+	quota = int(float(quota) * (1.0 - assist * 0.6))
+	trap_interval *= 1.0 + assist
 	# генерация задач по сиду узла — у всех пиров одинаково
 	var rng: = RandomNumberGenerator.new()
 	rng.seed = int(node["seed"])
@@ -456,15 +562,16 @@ func _build_node_config(node: Dictionary) -> Dictionary:
 			"title": "%s %s-%02d" % [TASKS[kind]["icon"], TASKS[kind]["title"], i + 1],
 			"done": false,
 		})
-	var risk: String = ["НИЗКИЙ", "СРЕДНИЙ", "ВЫСОКИЙ", "КРИТИЧЕСКИЙ"][tier]
+	var risk: String = ["ОБУЧЕНИЕ", "НИЗКИЙ", "СРЕДНИЙ", "ВЫСОКИЙ"][tier]
 	if node["boss"]:
-		risk = "ОРАКУЛ"
+		risk = "ПЕНТАГОН"
 	return {
 		"name": node["name"], "tier": tier, "boss": node["boss"],
 		"tier_name": t["name"], "tier_short": t["short"], "theme": t["theme"],
 		"antivirus": node["av"], "risk": risk, "seed": int(node["seed"]),
-		"quota": quota, "files": files, "crates": crates,
-		"tasks": tasks, "popups": popups, "hunters": hunters, "scanners": scanners,
+		"quota": quota, "files": files, "crates": crates, "tasks": tasks,
+		"sensitivity": sensitivity, "trap_interval": trap_interval,
+		"cam_range": cam_range, "trap_kinds": traps, "assist": assist,
 		"creep": creep, "difficulty": tier,
 	}
 
@@ -569,6 +676,12 @@ func compute_loot(victory: bool) -> Dictionary:
 
 func finish_hack(victory: bool) -> Dictionary:
 	var loot: = compute_loot(victory)
+	# украденное перепрошивкой возвращается после рейда
+	for id in stolen_abilities:
+		if not id in active_abilities and active_abilities.size() < 3:
+			active_abilities.append(id)
+	stolen_abilities.clear()
+	reset_until = 0.0
 	# карьерные счётчики — топливо заданий на активки
 	career["deposits"] += stats["deposits"]
 	career["delivered"] += stats["delivered"]

@@ -96,6 +96,14 @@ func _ready() -> void:
 	evac_label.visible = false
 	add_child(evac_label)
 
+	# прицел для вида от первого лица
+	var cross: = ColorRect.new()
+	cross.color = Color(0.85, 0.98, 1.0, 0.75)
+	cross.size = Vector2(4, 4)
+	cross.position = Vector2(798, 448)
+	cross.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(cross)
+
 	GameState.hp_changed.connect(_on_hp)
 
 func _on_hp(v: int) -> void:
