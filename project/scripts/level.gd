@@ -1530,7 +1530,7 @@ func server_grab(item_id: int, sender: int) -> void:
 	it.set_carried(new_carriers)
 	_sync_loot_state(it)
 	if _carry_strength(new_carriers) < it.weight:
-		Net.toast_all("%s взялся за «%s» — нужен второй!" % [Net.player_name(sender), it.loot_name], UIKit.AMBER) if Net.active else hud.toast("тяжело! нужен второй носильщик", UIKit.AMBER)
+		Net.toast_all("%s тащит «%s» в одиночку — медленно! Второй ускорит" % [Net.player_name(sender), it.loot_name], UIKit.AMBER) if Net.active else hud.toast("тяжело: тащишь один — медленно. Второй ускорит", UIKit.AMBER)
 
 func server_release(item_id: int, sender: int, throw: bool, dir: Vector3) -> void:
 	var it: LootItem = loots.get(item_id)
@@ -1980,7 +1980,8 @@ func _host_tick(delta: float) -> void:
 	for it in loots.values():
 		if not is_instance_valid(it) or it.deposited:
 			continue
-		if not it.carriers.is_empty() and _carry_strength(it.carriers) >= it.weight:
+		if not it.carriers.is_empty():
+			# груз следует за носильщиками даже в одиночку (просто медленно идут)
 			var mid: = Vector3.ZERO
 			var n: = 0
 			for cid in it.carriers:
@@ -2098,11 +2099,10 @@ func _apply_my_carry() -> void:
 		player.carry_factor = 1.0
 		return
 	player.carrying = true
-	if _carry_strength(it.carriers) < it.weight:
-		player.carry_factor = 0.22
-		return
 	var f: = 0.78
-	if it.weight >= 2:
+	if _carry_strength(it.carriers) < it.weight:
+		f = 0.38 # тащишь тяжесть в одиночку: ползёшь, но ползёшь
+	elif it.weight >= 2:
 		f = 0.6 if GameState.has_passive("ransomware") and it.carriers.size() == 1 else 0.66
 	if GameState.has_passive("worm"):
 		f += 0.08
@@ -2230,7 +2230,7 @@ func _handle_interactions(delta: float) -> void:
 
 	if carried != null:
 		if _carry_strength(carried.carriers) < carried.weight:
-			prompt = "«%s» тяжёлый: нужен второй! [E] бросить" % carried.loot_name
+			prompt = "тащишь «%s» ОДИН — медленно (второй ускорит) · [E] бросить" % carried.loot_name
 		else:
 			prompt = "неси «%s» в круг у портала · [F] бросить" % carried.loot_name
 	else:
@@ -2238,9 +2238,9 @@ func _handle_interactions(delta: float) -> void:
 		var wire: = _nearest_wire()
 		if it != null:
 			if it.weight > 1 and not it.carriers.is_empty():
-				prompt = "[E] подхватить «%s» (вас будет %d/%d)" % [it.loot_name, it.carriers.size() + 1, it.weight]
+				prompt = "[E] подхватить «%s» — вдвоём быстрее (%d/%d)" % [it.loot_name, it.carriers.size() + 1, it.weight]
 			elif it.weight > _my_strength():
-				prompt = "[E] взяться за «%s» — нужно %d носильщика" % [it.loot_name, it.weight]
+				prompt = "[E] взяться за «%s» — одному МЕДЛЕННО, вдвоём в темпе" % it.loot_name
 			else:
 				prompt = "[E] схватить «%s» (◈ %d)" % [it.loot_name, roundi(it.value)]
 		elif sync_at[0] >= 0:
