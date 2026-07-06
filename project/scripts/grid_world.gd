@@ -99,29 +99,40 @@ func _actor_for(id: int) -> Node3D:
 
 func _build_environment() -> void:
 	env = Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.006, 0.011, 0.024)
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.06, 0.1, 0.16)
-	env.ambient_light_energy = 1.2
+	# процедурное небо и мягкий объёмный свет — живее и реалистичнее
+	var sky_mat: = ProceduralSkyMaterial.new()
+	sky_mat.sky_top_color = Color(0.07, 0.1, 0.2)
+	sky_mat.sky_horizon_color = Color(0.18, 0.24, 0.36)
+	sky_mat.ground_bottom_color = Color(0.02, 0.03, 0.05)
+	sky_mat.ground_horizon_color = Color(0.12, 0.16, 0.25)
+	sky_mat.sun_angle_max = 30.0
+	var sky: = Sky.new()
+	sky.sky_material = sky_mat
+	env.background_mode = Environment.BG_SKY
+	env.sky = sky
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.ambient_light_energy = 1.6
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.ssao_enabled = true
+	env.ssao_intensity = 1.4
 	env.glow_enabled = true
-	env.glow_intensity = 0.95
-	env.glow_bloom = 0.15
-	env.glow_hdr_threshold = 0.85
+	env.glow_intensity = 0.7
+	env.glow_bloom = 0.1
+	env.glow_hdr_threshold = 1.0
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SCREEN
 	env.fog_enabled = true
-	env.fog_light_color = Color(0.03, 0.08, 0.13)
-	env.fog_density = 0.005
+	env.fog_light_color = Color(0.08, 0.12, 0.2)
+	env.fog_density = 0.0035
 	env.fog_sky_affect = 0.0
 	var we: = WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 
 	var sun: = DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-58, 40, 0)
-	sun.light_color = Color(0.45, 0.62, 0.85)
-	sun.light_energy = 0.2
+	sun.rotation_degrees = Vector3(-50, 40, 0)
+	sun.light_color = Color(0.92, 0.88, 0.8)
+	sun.light_energy = 0.55
+	sun.shadow_enabled = true
 	add_child(sun)
 
 func _neon(c: Color, e: = 1.8) -> StandardMaterial3D:
@@ -134,9 +145,9 @@ func _neon(c: Color, e: = 1.8) -> StandardMaterial3D:
 
 func _dark(metal: = 0.5) -> StandardMaterial3D:
 	var m: = StandardMaterial3D.new()
-	m.albedo_color = Color(0.03, 0.045, 0.07)
+	m.albedo_color = Color(0.12, 0.14, 0.18)
 	m.metallic = metal
-	m.roughness = 0.4
+	m.roughness = 0.45
 	return m
 
 func _mesh_box(size: Vector3, mat: Material, pos: Vector3, parent: Node3D = self) -> MeshInstance3D:

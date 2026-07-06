@@ -136,34 +136,39 @@ func _host_init() -> void:
 # ── окружение ───────────────────────────────────────────────
 
 func _build_environment() -> void:
+	## светлый «гаражный» свет в духе RV There Yet: мягкий ambient,
+	## SSAO для объёма, тёплое солнце с тенями, лёгкий туман
 	env = Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.008, 0.014, 0.028)
+	env.background_color = Color(0.035, 0.05, 0.075)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.07, 0.12, 0.18)
-	env.ambient_light_energy = 1.3
+	env.ambient_light_color = Color(0.38, 0.44, 0.54)
+	env.ambient_light_energy = 1.5
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.ssao_enabled = true
+	env.ssao_intensity = 1.6
+	env.ssao_radius = 1.6
 	env.glow_enabled = true
-	env.glow_intensity = 0.9
-	env.glow_bloom = 0.12
-	env.glow_hdr_threshold = 0.9
+	env.glow_intensity = 0.7
+	env.glow_bloom = 0.08
+	env.glow_hdr_threshold = 1.0
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SCREEN
 	env.volumetric_fog_enabled = true
-	env.volumetric_fog_density = 0.022
+	env.volumetric_fog_density = 0.008
 	_fog_base = Color(0.55, 0.25, 0.3) if is_boss else [
 		Color(0.35, 0.65, 0.8), Color(0.7, 0.55, 0.3), Color(0.45, 0.3, 0.75), Color(0.7, 0.3, 0.45),
 	][GameState.node_config.get("difficulty", 0)]
 	env.volumetric_fog_albedo = _fog_base
-	env.volumetric_fog_emission = Color(0.01, 0.03, 0.05)
-	env.volumetric_fog_emission_energy = 0.35
+	env.volumetric_fog_emission = Color(0.015, 0.035, 0.055)
+	env.volumetric_fog_emission_energy = 0.4
 	var we: = WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 
 	var sun: = DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-55, 35, 0)
-	sun.light_color = Color(0.5, 0.7, 0.9)
-	sun.light_energy = 0.22
+	sun.rotation_degrees = Vector3(-52, 32, 0)
+	sun.light_color = Color(0.95, 0.9, 0.82)
+	sun.light_energy = 0.55
 	sun.shadow_enabled = true
 	add_child(sun)
 
@@ -177,9 +182,16 @@ func _neon_mat(c: Color, energy: = 1.6) -> StandardMaterial3D:
 
 func _dark_mat() -> StandardMaterial3D:
 	var m: = StandardMaterial3D.new()
-	m.albedo_color = Color(0.06, 0.085, 0.125)
-	m.metallic = 0.55
-	m.roughness = 0.35
+	m.albedo_color = Color(0.13, 0.155, 0.19)
+	m.metallic = 0.5
+	m.roughness = 0.45
+	return m
+
+func _metal_mat(c: Color, rough: = 0.35) -> StandardMaterial3D:
+	var m: = StandardMaterial3D.new()
+	m.albedo_color = c
+	m.metallic = 0.85
+	m.roughness = rough
 	return m
 
 func _box(size: Vector3, mat: Material, pos: Vector3, parent: Node = self) -> MeshInstance3D:
@@ -240,7 +252,8 @@ func _build_arena() -> void:
 
 	# новый пол: панели-плиты и напольные кабель-каналы
 	var panel_mat: = _dark_mat()
-	panel_mat.albedo_color = Color(0.045, 0.065, 0.1)
+	panel_mat.albedo_color = Color(0.16, 0.185, 0.22)
+	panel_mat.roughness = 0.6
 	for i in 18:
 		var p: = Vector3(rng.randf_range(-hall.x * 0.5 + 5.0, hall.x * 0.5 - 5.0), 0.03, rng.randf_range(-hall.y * 0.5 + 5.0, hall.y * 0.5 - 5.0))
 		_box(Vector3(rng.randf_range(3.0, 5.0), 0.06, rng.randf_range(3.0, 5.0)), panel_mat, p)
@@ -266,6 +279,31 @@ func _build_arena() -> void:
 		var trim_pos: Vector3 = side["pos"]
 		trim_pos.y = 2.6
 		_box(trim_size * Vector3(1.0, 1.0, 1.02), trim_mat, trim_pos)
+
+	# потолок с рядами световых панелей — «коробка» и много света
+	var ceil_mat: = _dark_mat()
+	ceil_mat.albedo_color = Color(0.1, 0.115, 0.14)
+	_box(Vector3(hall.x, 0.35, hall.y), ceil_mat, Vector3(0, 7.3, 0))
+	var lamp_mat: = StandardMaterial3D.new()
+	lamp_mat.albedo_color = Color(0.9, 0.93, 1.0)
+	lamp_mat.emission_enabled = true
+	lamp_mat.emission = Color(0.92, 0.95, 1.0)
+	lamp_mat.emission_energy_multiplier = 2.4
+	var cols_n: = 3
+	var rows_n: = 2
+	for gx in cols_n:
+		for gz in rows_n:
+			var lp: = Vector3(
+				(float(gx) - float(cols_n - 1) * 0.5) * hall.x * 0.3,
+				7.05,
+				(float(gz) - float(rows_n - 1) * 0.5) * hall.y * 0.42)
+			_box(Vector3(4.6, 0.12, 1.7), lamp_mat, lp)
+			var ol: = OmniLight3D.new()
+			ol.light_color = Color(0.92, 0.95, 1.0)
+			ol.light_energy = 1.5
+			ol.omni_range = 20.0
+			ol.position = lp + Vector3(0, -0.6, 0)
+			add_child(ol)
 
 	# декоративные «свечки» неона
 	for i in 14:
@@ -740,26 +778,27 @@ func _build_unit_visual(type: String, pos: Vector3) -> Node3D:
 	root.position = pos
 	add_child(root)
 	if type == "ROBOT":
-		var body: = _box(Vector3(1.6, 2.2, 1.6), _dark_mat(), Vector3(0, 1.1, 0), root)
-		body.material_override = _dark_mat()
-		_box(Vector3(1.7, 0.25, 1.7), _neon_mat(Color(1.0, 0.15, 0.2), 2.2), Vector3(0, 1.9, 0), root)
-		var eye: = MeshInstance3D.new()
-		var sm: = SphereMesh.new()
-		sm.radius = 0.3
-		sm.height = 0.6
-		eye.mesh = sm
-		eye.material_override = _neon_mat(Color(1.0, 0.2, 0.2), 4.0)
-		eye.position = Vector3(0, 1.7, -0.75)
-		root.add_child(eye)
-		var rl: = OmniLight3D.new()
-		rl.light_color = Color(1.0, 0.2, 0.2)
-		rl.light_energy = 2.0
-		rl.omni_range = 8.0
-		rl.position.y = 2.2
-		root.add_child(rl)
+		_build_robot_visual(root)
 	elif type == "HOOK":
-		var hook: = _cone_mesh(0.22, 0.7, _neon_mat(Color(1.0, 0.5, 0.2), 2.5), Vector3(0, 0, 0), root)
-		hook.rotation.x = deg_to_rad(90.0)
+		# трёхпалая клешня-захват
+		var claw_mat: = _metal_mat(Color(0.75, 0.5, 0.25), 0.3)
+		var hub: = MeshInstance3D.new()
+		var hsm: = SphereMesh.new()
+		hsm.radius = 0.16
+		hsm.height = 0.32
+		hub.mesh = hsm
+		hub.material_override = claw_mat
+		root.add_child(hub)
+		for i in 3:
+			var ang: = TAU * float(i) / 3.0
+			var prong: = _cone_mesh(0.07, 0.42, claw_mat, Vector3(cos(ang) * 0.16, sin(ang) * 0.16, -0.18), root)
+			prong.rotation.x = deg_to_rad(115.0)
+			prong.rotation.z = ang
+		var hl: = OmniLight3D.new()
+		hl.light_color = Color(1.0, 0.55, 0.2)
+		hl.light_energy = 1.0
+		hl.omni_range = 3.5
+		root.add_child(hl)
 	else:
 		var info: Dictionary = GameState.TRAPS.get(type, {"color": Color(1, 0.3, 0.3)})
 		var c: Color = info["color"]
@@ -806,6 +845,150 @@ func _build_unit_visual(type: String, pos: Vector3) -> Node3D:
 		root.add_child(tl)
 	return root
 
+func _build_robot_visual(root: Node3D) -> void:
+	## робот-охотник НА КОЛЁСАХ: шасси, башня с пусковой трубой крюка,
+	## купол-голова с линзой, антенна с мигающим маячком, полосы опасности
+	var body_mat: = _metal_mat(Color(0.58, 0.62, 0.68), 0.35)
+	var dark: = _metal_mat(Color(0.16, 0.17, 0.2), 0.5)
+	var hazard_y: = _neon_mat(Color(0.95, 0.75, 0.15), 1.0)
+	var hazard_b: = _metal_mat(Color(0.08, 0.08, 0.09), 0.6)
+
+	# шасси с бампером
+	_box(Vector3(1.9, 0.55, 2.5), body_mat, Vector3(0, 0.72, 0), root)
+	_box(Vector3(1.6, 0.3, 2.2), dark, Vector3(0, 1.06, 0), root)
+	# полосы опасности на переднем и заднем бампере
+	for zz in [-1.28, 1.28]:
+		for k in 4:
+			var seg_mat: Material = hazard_y if k % 2 == 0 else hazard_b
+			_box(Vector3(0.45, 0.32, 0.06), seg_mat, Vector3(-0.68 + float(k) * 0.45, 0.72, zz), root)
+	# 4 колеса с дисками
+	var wheels: Array = []
+	var tire_mat: = _metal_mat(Color(0.07, 0.07, 0.08), 0.85)
+	for sx in [-1.0, 1.0]:
+		for sz in [-0.85, 0.85]:
+			var wheel: = MeshInstance3D.new()
+			var wm: = CylinderMesh.new()
+			wm.top_radius = 0.42
+			wm.bottom_radius = 0.42
+			wm.height = 0.32
+			wheel.mesh = wm
+			wheel.material_override = tire_mat
+			wheel.rotation.z = deg_to_rad(90.0)
+			wheel.position = Vector3(sx * 1.02, 0.42, sz)
+			root.add_child(wheel)
+			var hubcap: = MeshInstance3D.new()
+			var hm: = CylinderMesh.new()
+			hm.top_radius = 0.2
+			hm.bottom_radius = 0.2
+			hm.height = 0.34
+			hubcap.mesh = hm
+			hubcap.material_override = _neon_mat(Color(1.0, 0.3, 0.25), 1.2)
+			wheel.add_child(hubcap)
+			wheels.append(wheel)
+	root.set_meta("wheels", wheels)
+	# башня-торс
+	_box(Vector3(1.35, 1.0, 1.1), body_mat, Vector3(0, 1.75, 0), root)
+	_box(Vector3(1.42, 0.14, 1.16), dark, Vector3(0, 2.28, 0), root)
+	# пусковая труба крюка на правом плече
+	var tube: = MeshInstance3D.new()
+	var tm: = CylinderMesh.new()
+	tm.top_radius = 0.17
+	tm.bottom_radius = 0.2
+	tm.height = 1.0
+	tube.mesh = tm
+	tube.material_override = dark
+	tube.rotation.x = deg_to_rad(90.0)
+	tube.position = Vector3(0.62, 2.05, -0.35)
+	root.add_child(tube)
+	_box(Vector3(0.3, 0.3, 0.3), body_mat, Vector3(0.62, 2.05, 0.35), root)
+	# кабели по левому борту
+	for k in 3:
+		_box(Vector3(0.06, 0.85, 0.06), _metal_mat(Color(0.12, 0.12, 0.14), 0.4), Vector3(-0.72, 1.75, -0.25 + float(k) * 0.25), root)
+	# голова-купол с линзой
+	var dome: = MeshInstance3D.new()
+	var dm: = SphereMesh.new()
+	dm.radius = 0.4
+	dm.height = 0.62
+	dome.mesh = dm
+	dome.material_override = body_mat
+	dome.position = Vector3(0, 2.55, 0)
+	root.add_child(dome)
+	var lens: = MeshInstance3D.new()
+	var lm: = SphereMesh.new()
+	lm.radius = 0.15
+	lm.height = 0.3
+	lens.mesh = lm
+	lens.material_override = _neon_mat(Color(1.0, 0.2, 0.2), 4.0)
+	lens.position = Vector3(0, 2.58, -0.34)
+	root.add_child(lens)
+	_box(Vector3(0.7, 0.1, 0.2), dark, Vector3(0, 2.75, -0.22), root)
+	# антенна с маячком
+	_box(Vector3(0.04, 0.55, 0.04), dark, Vector3(-0.35, 2.95, 0.2), root)
+	var beacon: = MeshInstance3D.new()
+	var bm2: = SphereMesh.new()
+	bm2.radius = 0.1
+	bm2.height = 0.2
+	beacon.mesh = bm2
+	var beacon_mat: = _neon_mat(Color(1.0, 0.45, 0.1), 2.0)
+	beacon.material_override = beacon_mat
+	beacon.position = Vector3(-0.35, 3.28, 0.2)
+	root.add_child(beacon)
+	root.set_meta("beacon_mat", beacon_mat)
+	# красная подсветка угрозы
+	var rl: = OmniLight3D.new()
+	rl.light_color = Color(1.0, 0.25, 0.2)
+	rl.light_energy = 1.6
+	rl.omni_range = 9.0
+	rl.position.y = 2.6
+	root.add_child(rl)
+
+func _units_visual_tick(delta: float) -> void:
+	## каждый пир: колёса крутятся, маячок мигает, трос крюка тянется к роботу
+	var t: = Time.get_ticks_msec() / 1000.0
+	var robot_node: Node3D = null
+	for uid in sys_units:
+		var u: Dictionary = sys_units[uid]
+		if u["type"] == "ROBOT" and is_instance_valid(u["node"]):
+			robot_node = u["node"]
+			break
+	for uid in sys_units:
+		var u: Dictionary = sys_units[uid]
+		var node: Node3D = u["node"]
+		if not is_instance_valid(node):
+			continue
+		match u["type"]:
+			"ROBOT":
+				var last: Vector3 = u.get("last_pos", node.global_position)
+				var moved: = (node.global_position - last).length()
+				u["last_pos"] = node.global_position
+				var spin: = moved / 0.42
+				for w in node.get_meta("wheels", []):
+					if is_instance_valid(w):
+						w.rotate_object_local(Vector3.UP, spin)
+				var bmat: StandardMaterial3D = node.get_meta("beacon_mat", null)
+				if bmat != null:
+					bmat.emission_energy_multiplier = 1.2 + 3.0 * maxf(sin(t * 7.0), 0.0)
+			"HOOK":
+				node.rotate_z(delta * 4.0)
+				var cable: MeshInstance3D = u.get("cable", null)
+				if cable == null or not is_instance_valid(cable):
+					cable = MeshInstance3D.new()
+					var cbm: = BoxMesh.new()
+					cbm.size = Vector3(0.05, 0.05, 1.0)
+					cable.mesh = cbm
+					cable.material_override = _metal_mat(Color(0.35, 0.28, 0.18), 0.5)
+					add_child(cable)
+					u["cable"] = cable
+				var anchor: Vector3 = u["origin"]
+				if robot_node != null:
+					anchor = robot_node.global_position + Vector3(0.62, 2.05, 0)
+				var from: = node.global_position
+				var dist: = from.distance_to(anchor)
+				if dist > 0.3:
+					cable.global_position = (from + anchor) * 0.5
+					cable.look_at_from_position(cable.global_position, anchor, Vector3.UP)
+					cable.scale = Vector3(1, 1, dist)
+
 func _cone_mesh(bottom: float, height: float, mat: Material, pos: Vector3, parent: Node3D) -> MeshInstance3D:
 	var mi: = MeshInstance3D.new()
 	var cm: = CylinderMesh.new()
@@ -828,8 +1011,12 @@ func _holo_add(c: Color, alpha: float) -> StandardMaterial3D:
 
 func _despawn_unit(uid: int) -> void:
 	var u: Dictionary = sys_units.get(uid, {})
-	if not u.is_empty() and is_instance_valid(u["node"]):
-		u["node"].queue_free()
+	if not u.is_empty():
+		if is_instance_valid(u["node"]):
+			u["node"].queue_free()
+		var cable: MeshInstance3D = u.get("cable", null)
+		if cable != null and is_instance_valid(cable):
+			cable.queue_free()
 	sys_units.erase(uid)
 	if Net.active:
 		Net.send_enemy_gone(uid)
@@ -1124,8 +1311,12 @@ func _on_enemy_gone(id: int) -> void:
 	if Net.is_server():
 		return
 	var u: Dictionary = sys_units.get(id, {})
-	if not u.is_empty() and is_instance_valid(u["node"]):
-		u["node"].queue_free()
+	if not u.is_empty():
+		if is_instance_valid(u["node"]):
+			u["node"].queue_free()
+		var cable: MeshInstance3D = u.get("cable", null)
+		if cable != null and is_instance_valid(cable):
+			cable.queue_free()
 	sys_units.erase(id)
 
 func apply_enemy_effect(kind: String, arg: float, pos: Vector3) -> void:
@@ -1950,6 +2141,7 @@ func _process(delta: float) -> void:
 	_apply_my_carry()
 	_phase_fx_tick(delta)
 	_cams_tick(delta)
+	_units_visual_tick(delta)
 	_screen_t -= delta
 	if _screen_t <= 0.0:
 		_screen_t = 0.25
