@@ -108,7 +108,7 @@ func _build_tunnel() -> void:
 	glass.metallic = 0.2
 	glass.cull_mode = BaseMaterial3D.CULL_DISABLED
 	for side in [-1.0, 1.0]:
-		var wall_x: = side * hw
+		var wall_x: float = side * hw
 		# сплошной коллайдер стены
 		_collide(Vector3(0.5, TUNNEL_H, length), Vector3(wall_x, TUNNEL_H * 0.5, cz))
 		var seg_z: = Z_START
