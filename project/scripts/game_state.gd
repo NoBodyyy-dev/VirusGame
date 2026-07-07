@@ -178,8 +178,76 @@ const TIERS: = [
 		"sensitivity": 4, "trap_interval": 7.0, "cam_range": 17.0, "traps": ["laser", "cage", "reset", "pull", "mark", "reflash"]},
 ]
 
-## серверов на зону Грида: T0 → T3, затем босс ПЕНТАГОН
-const ZONES: = [3, 12, 25, 39]
+# ── карта Грида: этапы 0..3 + ОРАКУЛ ────────────────────────
+## Комнаты (оси: x вправо, север = -Z). zs — южная стена, zn — северная.
+## Планировка фиксированная (детерминизм для коопа), детали — по сидам.
+const GRID_ROOMS: = {
+	# этап 0 — коробка без интерактива
+	"r0":    {"stage": 0, "x0": -9.0, "x1": 9.0, "zs": 10.0, "zn": -6.0, "h": 6.0},
+	# этап 1 — ночной мегаполис (2 комнаты + секретки)
+	"a1":    {"stage": 1, "x0": -9.0, "x1": 9.0, "zs": -8.0, "zn": -44.0, "h": 9.0},
+	"b1":    {"stage": 1, "x0": 9.0, "x1": 55.0, "zs": -26.0, "zn": -56.0, "h": 9.0},
+	"s1a":   {"stage": 1, "x0": -21.0, "x1": -9.0, "zs": -20.0, "zn": -32.0, "h": 5.0, "secret": true},
+	"s1b":   {"stage": 1, "x0": 30.0, "x1": 42.0, "zs": -14.0, "zn": -26.0, "h": 5.0, "secret": true},
+	# этап 2 — затхлые офисы (2 комнаты, ярус, секретки, серверные)
+	"c2":    {"stage": 2, "x0": 24.0, "x1": 70.0, "zs": -78.0, "zn": -116.0, "h": 10.0},
+	"d2":    {"stage": 2, "x0": 70.0, "x1": 126.0, "zs": -108.0, "zn": -152.0, "h": 12.0},
+	"s2a":   {"stage": 2, "x0": 12.0, "x1": 24.0, "zs": -88.0, "zn": -100.0, "h": 5.0, "secret": true},
+	"s2b":   {"stage": 2, "x0": 126.0, "x1": 138.0, "zs": -124.0, "zn": -136.0, "h": 5.0, "secret": true},
+	"srv2a": {"stage": 2, "x0": 30.0, "x1": 42.0, "zs": -116.0, "zn": -128.0, "h": 6.0},
+	"srv2b": {"stage": 2, "x0": 100.0, "x1": 112.0, "zs": -96.0, "zn": -108.0, "h": 6.0},
+	# этап 3 — бункер (4 комнаты, серверные, секретка)
+	"e1":    {"stage": 3, "x0": 74.0, "x1": 118.0, "zs": -176.0, "zn": -212.0, "h": 10.0},
+	"e2":    {"stage": 3, "x0": 118.0, "x1": 154.0, "zs": -196.0, "zn": -226.0, "h": 9.0},
+	"e3":    {"stage": 3, "x0": 98.0, "x1": 146.0, "zs": -226.0, "zn": -264.0, "h": 11.0},
+	"e4":    {"stage": 3, "x0": 58.0, "x1": 98.0, "zs": -234.0, "zn": -260.0, "h": 9.0},
+	"srv3a": {"stage": 3, "x0": 62.0, "x1": 74.0, "zs": -192.0, "zn": -204.0, "h": 6.0},
+	"srv3b": {"stage": 3, "x0": 154.0, "x1": 166.0, "zs": -206.0, "zn": -218.0, "h": 6.0},
+	"srv3c": {"stage": 3, "x0": 70.0, "x1": 82.0, "zs": -222.0, "zn": -234.0, "h": 6.0},
+	"s3a":   {"stage": 3, "x0": 104.0, "x1": 116.0, "zs": -264.0, "zn": -276.0, "h": 6.0, "secret": true},
+	# ОРАКУЛ — гигантский зал одного сервера
+	"or":    {"stage": 4, "x0": 70.0, "x1": 178.0, "zs": -290.0, "zn": -386.0, "h": 22.0},
+}
+
+## серверы: зона (0=этап 1, 1=этап 2, 2=этап 3), тир, позиция,
+## door — ключ двери-головоломки ("" = открыт), room — комната
+const GRID_SERVERS: = [
+	# этап 1: единственный сервер на платформе — стройте лестницу из блоков
+	{"zone": 0, "tier": 0, "pos": Vector3(40, 4.5, -46), "door": "", "room": "b1"},
+	# этап 2: 8 серверов
+	{"zone": 1, "tier": 1, "pos": Vector3(34, 0, -90), "door": "", "room": "c2"},
+	{"zone": 1, "tier": 1, "pos": Vector3(58, 0, -104), "door": "", "room": "c2"},
+	{"zone": 1, "tier": 1, "pos": Vector3(36, 0, -122), "door": "d_srv2a", "room": "srv2a"},
+	{"zone": 1, "tier": 1, "pos": Vector3(84, 0, -124), "door": "", "room": "d2"},
+	{"zone": 1, "tier": 1, "pos": Vector3(112, 0, -144), "door": "", "room": "d2"},
+	{"zone": 1, "tier": 1, "pos": Vector3(106, 0, -102), "door": "d_srv2b", "room": "srv2b"},
+	{"zone": 1, "tier": 2, "pos": Vector3(74, 6.0, -136), "door": "", "room": "d2"},
+	{"zone": 1, "tier": 2, "pos": Vector3(108, 6.0, -148), "door": "", "room": "d2"},
+	# этап 3: 19 серверов (итого по Гриду 28)
+	{"zone": 2, "tier": 2, "pos": Vector3(80, 0, -184), "door": "", "room": "e1"},
+	{"zone": 2, "tier": 2, "pos": Vector3(92, 0, -206), "door": "", "room": "e1"},
+	{"zone": 2, "tier": 2, "pos": Vector3(110, 0, -182), "door": "", "room": "e1"},
+	{"zone": 2, "tier": 3, "pos": Vector3(68, 0, -198), "door": "d_srv3a", "room": "srv3a"},
+	{"zone": 2, "tier": 2, "pos": Vector3(126, 0, -202), "door": "", "room": "e2"},
+	{"zone": 2, "tier": 2, "pos": Vector3(146, 0, -220), "door": "", "room": "e2"},
+	{"zone": 2, "tier": 2, "pos": Vector3(124, 0, -220), "door": "", "room": "e2"},
+	{"zone": 2, "tier": 3, "pos": Vector3(160, 0, -212), "door": "d_srv3b", "room": "srv3b"},
+	{"zone": 2, "tier": 2, "pos": Vector3(104, 0, -232), "door": "", "room": "e3"},
+	{"zone": 2, "tier": 2, "pos": Vector3(140, 0, -232), "door": "", "room": "e3"},
+	{"zone": 2, "tier": 2, "pos": Vector3(102, 0, -258), "door": "", "room": "e3"},
+	{"zone": 2, "tier": 3, "pos": Vector3(124, 0, -246), "door": "", "room": "e3"},
+	{"zone": 2, "tier": 2, "pos": Vector3(130, 0, -256), "door": "", "room": "e3"},
+	{"zone": 2, "tier": 3, "pos": Vector3(118, 6.0, -261), "door": "", "room": "e3"},
+	{"zone": 2, "tier": 3, "pos": Vector3(136, 6.0, -261), "door": "", "room": "e3"},
+	{"zone": 2, "tier": 2, "pos": Vector3(66, 0, -240), "door": "", "room": "e4"},
+	{"zone": 2, "tier": 2, "pos": Vector3(88, 0, -254), "door": "", "room": "e4"},
+	{"zone": 2, "tier": 3, "pos": Vector3(64, 0, -256), "door": "", "room": "e4"},
+	{"zone": 2, "tier": 3, "pos": Vector3(76, 0, -228), "door": "d_srv3c", "room": "srv3c"},
+]
+
+const ORACLE_PUZZLES_TOTAL: = 15   # головоломки на пути к ядру Оракула
+const ORACLE_TERRITORIES: = 3      # территории для захвата в зале
+const ORACLE_RACKS: = 4            # стойки данных: украсть ВСЮ информацию
 
 # ── прогрессия игрока (дерево эволюции) ─────────────────────
 var branch: = ""              # выбранная ветка ("" = ещё не выбрана)
@@ -190,7 +258,10 @@ var career: = {"deposits": 0, "delivered": 0, "tasks": 0, "raids": 0}
 
 var resources: = {"data_fragments": 0, "code_samples": 0, "mutagen": 0, "ghost_tokens": 0}
 var grid_nodes: Array = []
-var grid_zones: Array = []   # [{tier, z0, z1, half, count}] — комнаты Грида
+var grid_zones: Array = []   # [{tier, count}] — этапы Грида (зоны серверов)
+var grid_flags: = {}         # постоянные флаги интерактива Грида: двери, рычаги, провода…
+var block_positions: = {}    # id блока -> Vector3 (лестницы из блоков переживают рейды)
+var oracle_core_down: = false  # ядро Оракула разрушено (идёт побег)
 var reset_until: = 0.0       # ловушка «сброс до нуля»: скин временно базовый
 var stolen_abilities: Array = []   # украдено перепрошивкой (вернутся после рейда)
 var grid_heat: = 0.0
@@ -416,56 +487,94 @@ func new_campaign() -> void:
 	resources = {"data_fragments": 0, "code_samples": 0, "mutagen": 0, "ghost_tokens": 0}
 	grid_heat = 0.0
 	campaign_won = false
+	grid_flags = {}
+	block_positions = {}
+	oracle_core_down = false
 	last_result = {}
 	current_node = {}
 	_generate_grid()
 	evolution_changed.emit()
 
 func _generate_grid() -> void:
-	## Грид — анфилада зон-комнат: T0(3) → T1(12) → T2(25) → T3(39) → ПЕНТАГОН.
-	## Проход в следующую зону открывается, когда взломаны ВСЕ серверы текущей.
+	## Грид по карте: этап 0 (коробка) → этап 1 (мегаполис, 1 сервер) →
+	## этап 2 (офисы, 8) → этап 3 (бункер, 19) → ОРАКУЛ.
+	## Туннель в следующий этап открывается, когда взломаны ВСЕ серверы текущего.
 	grid_nodes.clear()
 	grid_zones.clear()
+	var counts: = [0, 0, 0]
 	var id: = 0
-	var z_cursor: = 30.0   # вход; зоны уходят в -Z
-	for zi in ZONES.size():
-		var count: int = ZONES[zi]
-		var cols: = int(ceil(sqrt(float(count) * 1.6)))
-		var rows: = int(ceil(float(count) / float(cols)))
-		var spacing: = 17.0
-		var half: = maxf(38.0, float(cols) * spacing * 0.5 + 14.0)
-		var length: = float(rows) * spacing + 42.0
-		var z0: = z_cursor
-		var placed: = 0
-		for r in rows:
-			for c in cols:
-				if placed >= count:
-					break
-				var x: = (float(c) - float(cols - 1) * 0.5) * spacing + randf_range(-2.0, 2.0)
-				var z: = z0 - 26.0 - float(r) * spacing + randf_range(-2.0, 2.0)
-				grid_nodes.append({
-					"id": id, "zone": zi, "tier": zi, "boss": false,
-					"pos": Vector3(x, 0.0, z),
-					"name": "%s-%02d" % [_tier_prefix(zi), id],
-					"av": TIERS[zi]["av"], "infected": false, "failed": false,
-					"seed": randi(),
-				})
-				placed += 1
-				id += 1
-		grid_zones.append({"tier": zi, "z0": z0, "z1": z0 - length, "half": half, "count": count})
-		z_cursor = z0 - length
-	# финальная зона — ПЕНТАГОН
-	var bz0: = z_cursor
-	grid_nodes.append({
-		"id": id, "zone": ZONES.size(), "tier": 3, "boss": true,
-		"pos": Vector3(0.0, 0.0, bz0 - 46.0),
-		"name": "ПЕНТАГОН", "av": "SENTINEL-X", "infected": false, "failed": false,
-		"seed": randi(),
-	})
-	grid_zones.append({"tier": 3, "z0": bz0, "z1": bz0 - 84.0, "half": 46.0, "count": 1})
+	for srv in GRID_SERVERS:
+		var zone: int = srv["zone"]
+		counts[zone] += 1
+		grid_nodes.append({
+			"id": id, "zone": zone, "tier": srv["tier"], "boss": false,
+			"pos": srv["pos"], "door": srv["door"], "room": srv["room"],
+			"name": "%s-%02d" % [_stage_prefix(zone), id],
+			"av": TIERS[srv["tier"]]["av"], "infected": false, "failed": false,
+			"seed": randi(),
+		})
+		id += 1
+	for zi in counts.size():
+		grid_zones.append({"tier": mini(zi + 1, 3), "count": counts[zi]})
 
-func _tier_prefix(tier: int) -> String:
-	return ["PC", "SHOP", "DC", "MIL"][tier]
+func _stage_prefix(zone: int) -> String:
+	return ["CITY", "OFC", "BNK"][zone]
+
+# ── постоянные флаги интерактива Грида ──────────────────────
+
+func flag(key: String) -> bool:
+	return grid_flags.get(key, false)
+
+func set_flag(key: String, on: = true) -> void:
+	if grid_flags.get(key, false) == on:
+		return
+	grid_flags[key] = on
+	if on and Net.active:
+		Net.send_grid_flag(key)   # кооп: двери/рычаги/провода общие на стаю
+
+func count_flags(prefix: String) -> int:
+	var c: = 0
+	for key in grid_flags:
+		if key.begins_with(prefix) and grid_flags[key]:
+			c += 1
+	return c
+
+## питание лифта яруса этапа 2: 2 рычага + провод + роутер
+func stage2_lift_powered() -> bool:
+	return flag("lever:s2a") and flag("lever:s2b") and flag("wire:s2") and flag("router:s2")
+
+## питание этапа 3: 3 генератора (каждому нужен провод) + главный рубильник
+func stage3_powered() -> bool:
+	return flag("gen:g1") and flag("gen:g2") and flag("gen:g3") and flag("lever:s3master")
+
+func stage3_generators_on() -> int:
+	var c: = 0
+	for g in ["g1", "g2", "g3"]:
+		if flag("gen:" + g):
+			c += 1
+	return c
+
+## этап 3: 28/28 серверов — красная тревога, сирена, туннель к Оракулу
+func red_alert() -> bool:
+	return zone_complete(2)
+
+func oracle_puzzles_done() -> int:
+	return count_flags("opz:")
+
+func oracle_territories_done() -> int:
+	return count_flags("oterr:")
+
+func oracle_racks_done() -> int:
+	return count_flags("orack:")
+
+## ядро Оракула уязвимо: 15 головоломок + провода/рычаг + 3 территории + вся дата
+func oracle_core_open() -> bool:
+	return oracle_puzzles_done() >= ORACLE_PUZZLES_TOTAL \
+		and flag("wire:or") and flag("lever:or") \
+		and oracle_territories_done() >= ORACLE_TERRITORIES
+
+func oracle_data_stolen() -> bool:
+	return oracle_racks_done() >= ORACLE_RACKS
 
 func total_nodes() -> int:
 	return grid_nodes.size()
@@ -505,13 +614,18 @@ func frontier_zone() -> int:
 	return grid_zones.size() - 1
 
 func node_unlocked(node: Dictionary) -> bool:
-	return zone_open(node["zone"])
+	if not zone_open(node["zone"]):
+		return false
+	var door: String = node.get("door", "")
+	return door == "" or flag("door:" + door)
 
 func node_lock_reason(node: Dictionary) -> String:
 	var z: int = node["zone"]
-	if z <= 0:
-		return ""
-	return "взломайте все серверы зоны %d (%d/%d)" % [z - 1, zone_infected(z - 1), zone_total(z - 1)]
+	if not zone_open(z):
+		return "взломайте все серверы этапа %d (%d/%d)" % [z, zone_infected(z - 1), zone_total(z - 1)]
+	if node.get("door", "") != "" and not flag("door:" + node["door"]):
+		return "комната заперта — решите головоломку на двери"
+	return ""
 
 # ── вспомогательный взлом (T2+): рой уже взломанных серверов ─
 

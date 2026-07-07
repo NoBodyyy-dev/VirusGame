@@ -595,6 +595,28 @@ func cl_task_done(idx: int, participants: Array) -> void:
 		tasks[idx]["done"] = true
 	task_done.emit(idx, participants)
 
+# ── флаги интерактива Грида (двери, рычаги, провода…) ───────
+
+func send_grid_flag(key: String) -> void:
+	## флаг выставлен локально — разослать всем (флаги только взводятся)
+	if not active:
+		return
+	if multiplayer.is_server():
+		cl_grid_flag.rpc(key)
+	else:
+		srv_grid_flag.rpc_id(1, key)
+
+@rpc("any_peer", "call_remote", "reliable")
+func srv_grid_flag(key: String) -> void:
+	if not multiplayer.is_server():
+		return
+	GameState.grid_flags[key] = true
+	cl_grid_flag.rpc(key)
+
+@rpc("authority", "call_remote", "reliable")
+func cl_grid_flag(key: String) -> void:
+	GameState.grid_flags[key] = true
+
 # ── рентген Spyware ─────────────────────────────────────────
 
 func send_xray() -> void:
