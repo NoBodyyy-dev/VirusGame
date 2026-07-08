@@ -182,8 +182,8 @@ const TIERS: = [
 ## Комнаты (оси: x вправо, север = -Z). zs — южная стена, zn — северная.
 ## Планировка фиксированная (детерминизм для коопа), детали — по сидам.
 const GRID_ROOMS: = {
-	# этап 0 — коробка без интерактива
-	"r0":    {"stage": 0, "x0": -9.0, "x1": 9.0, "zs": 10.0, "zn": -6.0, "h": 6.0},
+	# этап 0 — обучающий ангар (в ~6 раз больше прежней коробки): 3 сервера
+	"r0":    {"stage": 0, "x0": -24.0, "x1": 24.0, "zs": 40.0, "zn": -6.0, "h": 9.0},
 	# этап 1 — ночной мегаполис (2 комнаты + секретки)
 	"a1":    {"stage": 1, "x0": -9.0, "x1": 9.0, "zs": -8.0, "zn": -44.0, "h": 9.0},
 	"b1":    {"stage": 1, "x0": 9.0, "x1": 55.0, "zs": -26.0, "zn": -56.0, "h": 9.0},
@@ -209,40 +209,44 @@ const GRID_ROOMS: = {
 	"or":    {"stage": 4, "x0": 70.0, "x1": 178.0, "zs": -290.0, "zn": -386.0, "h": 22.0},
 }
 
-## серверы: зона (0=этап 1, 1=этап 2, 2=этап 3), тир, позиция,
+## серверы: зона (0=обучение, 1=этап1, 2=этап2, 3=этап3), тир, позиция,
 ## door — ключ двери-головоломки ("" = открыт), room — комната
 const GRID_SERVERS: = [
+	# этап 0 — обучение: 3 сервера учат базовым концептам (T0, лёгкий рейд)
+	{"zone": 0, "tier": 0, "pos": Vector3(0, 0, 16), "door": "", "room": "r0"},       # просто [E]
+	{"zone": 0, "tier": 0, "pos": Vector3(-16, 0, 0), "door": "d_tut", "room": "r0"}, # за головоломкой
+	{"zone": 0, "tier": 0, "pos": Vector3(14, 2.6, 8), "door": "", "room": "r0"},     # на платформе (блок)
 	# этап 1: единственный сервер на платформе — стройте лестницу из блоков
-	{"zone": 0, "tier": 0, "pos": Vector3(40, 4.5, -46), "door": "", "room": "b1"},
+	{"zone": 1, "tier": 0, "pos": Vector3(40, 4.5, -46), "door": "", "room": "b1"},
 	# этап 2: 8 серверов
-	{"zone": 1, "tier": 1, "pos": Vector3(34, 0, -90), "door": "", "room": "c2"},
-	{"zone": 1, "tier": 1, "pos": Vector3(58, 0, -104), "door": "", "room": "c2"},
-	{"zone": 1, "tier": 1, "pos": Vector3(36, 0, -122), "door": "d_srv2a", "room": "srv2a"},
-	{"zone": 1, "tier": 1, "pos": Vector3(84, 0, -124), "door": "", "room": "d2"},
-	{"zone": 1, "tier": 1, "pos": Vector3(112, 0, -144), "door": "", "room": "d2"},
-	{"zone": 1, "tier": 1, "pos": Vector3(106, 0, -102), "door": "d_srv2b", "room": "srv2b"},
-	{"zone": 1, "tier": 2, "pos": Vector3(74, 6.0, -136), "door": "", "room": "d2"},
-	{"zone": 1, "tier": 2, "pos": Vector3(108, 6.0, -148), "door": "", "room": "d2"},
-	# этап 3: 19 серверов (итого по Гриду 28)
-	{"zone": 2, "tier": 2, "pos": Vector3(80, 0, -184), "door": "", "room": "e1"},
-	{"zone": 2, "tier": 2, "pos": Vector3(92, 0, -206), "door": "", "room": "e1"},
-	{"zone": 2, "tier": 2, "pos": Vector3(110, 0, -182), "door": "", "room": "e1"},
-	{"zone": 2, "tier": 3, "pos": Vector3(68, 0, -198), "door": "d_srv3a", "room": "srv3a"},
-	{"zone": 2, "tier": 2, "pos": Vector3(126, 0, -202), "door": "", "room": "e2"},
-	{"zone": 2, "tier": 2, "pos": Vector3(146, 0, -220), "door": "", "room": "e2"},
-	{"zone": 2, "tier": 2, "pos": Vector3(124, 0, -220), "door": "", "room": "e2"},
-	{"zone": 2, "tier": 3, "pos": Vector3(160, 0, -212), "door": "d_srv3b", "room": "srv3b"},
-	{"zone": 2, "tier": 2, "pos": Vector3(104, 0, -232), "door": "", "room": "e3"},
-	{"zone": 2, "tier": 2, "pos": Vector3(140, 0, -232), "door": "", "room": "e3"},
-	{"zone": 2, "tier": 2, "pos": Vector3(102, 0, -258), "door": "", "room": "e3"},
-	{"zone": 2, "tier": 3, "pos": Vector3(124, 0, -246), "door": "", "room": "e3"},
-	{"zone": 2, "tier": 2, "pos": Vector3(130, 0, -256), "door": "", "room": "e3"},
-	{"zone": 2, "tier": 3, "pos": Vector3(118, 6.0, -261), "door": "", "room": "e3"},
-	{"zone": 2, "tier": 3, "pos": Vector3(136, 6.0, -261), "door": "", "room": "e3"},
-	{"zone": 2, "tier": 2, "pos": Vector3(66, 0, -240), "door": "", "room": "e4"},
-	{"zone": 2, "tier": 2, "pos": Vector3(88, 0, -254), "door": "", "room": "e4"},
-	{"zone": 2, "tier": 3, "pos": Vector3(64, 0, -256), "door": "", "room": "e4"},
-	{"zone": 2, "tier": 3, "pos": Vector3(76, 0, -228), "door": "d_srv3c", "room": "srv3c"},
+	{"zone": 2, "tier": 1, "pos": Vector3(34, 0, -90), "door": "", "room": "c2"},
+	{"zone": 2, "tier": 1, "pos": Vector3(58, 0, -104), "door": "", "room": "c2"},
+	{"zone": 2, "tier": 1, "pos": Vector3(36, 0, -122), "door": "d_srv2a", "room": "srv2a"},
+	{"zone": 2, "tier": 1, "pos": Vector3(84, 0, -124), "door": "", "room": "d2"},
+	{"zone": 2, "tier": 1, "pos": Vector3(112, 0, -144), "door": "", "room": "d2"},
+	{"zone": 2, "tier": 1, "pos": Vector3(106, 0, -102), "door": "d_srv2b", "room": "srv2b"},
+	{"zone": 2, "tier": 2, "pos": Vector3(74, 6.0, -136), "door": "", "room": "d2"},
+	{"zone": 2, "tier": 2, "pos": Vector3(108, 6.0, -148), "door": "", "room": "d2"},
+	# этап 3: 19 серверов (итого по Гриду 28 «боевых» + 3 обучающих)
+	{"zone": 3, "tier": 2, "pos": Vector3(80, 0, -184), "door": "", "room": "e1"},
+	{"zone": 3, "tier": 2, "pos": Vector3(92, 0, -206), "door": "", "room": "e1"},
+	{"zone": 3, "tier": 2, "pos": Vector3(110, 0, -182), "door": "", "room": "e1"},
+	{"zone": 3, "tier": 3, "pos": Vector3(68, 0, -198), "door": "d_srv3a", "room": "srv3a"},
+	{"zone": 3, "tier": 2, "pos": Vector3(126, 0, -202), "door": "", "room": "e2"},
+	{"zone": 3, "tier": 2, "pos": Vector3(146, 0, -220), "door": "", "room": "e2"},
+	{"zone": 3, "tier": 2, "pos": Vector3(124, 0, -220), "door": "", "room": "e2"},
+	{"zone": 3, "tier": 3, "pos": Vector3(160, 0, -212), "door": "d_srv3b", "room": "srv3b"},
+	{"zone": 3, "tier": 2, "pos": Vector3(104, 0, -232), "door": "", "room": "e3"},
+	{"zone": 3, "tier": 2, "pos": Vector3(140, 0, -232), "door": "", "room": "e3"},
+	{"zone": 3, "tier": 2, "pos": Vector3(102, 0, -258), "door": "", "room": "e3"},
+	{"zone": 3, "tier": 3, "pos": Vector3(124, 0, -246), "door": "", "room": "e3"},
+	{"zone": 3, "tier": 2, "pos": Vector3(130, 0, -256), "door": "", "room": "e3"},
+	{"zone": 3, "tier": 3, "pos": Vector3(118, 6.0, -261), "door": "", "room": "e3"},
+	{"zone": 3, "tier": 3, "pos": Vector3(136, 6.0, -261), "door": "", "room": "e3"},
+	{"zone": 3, "tier": 2, "pos": Vector3(66, 0, -240), "door": "", "room": "e4"},
+	{"zone": 3, "tier": 2, "pos": Vector3(88, 0, -254), "door": "", "room": "e4"},
+	{"zone": 3, "tier": 3, "pos": Vector3(64, 0, -256), "door": "", "room": "e4"},
+	{"zone": 3, "tier": 3, "pos": Vector3(76, 0, -228), "door": "d_srv3c", "room": "srv3c"},
 ]
 
 const ORACLE_PUZZLES_TOTAL: = 15   # головоломки на пути к ядру Оракула
@@ -501,7 +505,7 @@ func _generate_grid() -> void:
 	## Туннель в следующий этап открывается, когда взломаны ВСЕ серверы текущего.
 	grid_nodes.clear()
 	grid_zones.clear()
-	var counts: = [0, 0, 0]
+	var counts: = [0, 0, 0, 0]
 	var id: = 0
 	for srv in GRID_SERVERS:
 		var zone: int = srv["zone"]
@@ -515,10 +519,17 @@ func _generate_grid() -> void:
 		})
 		id += 1
 	for zi in counts.size():
-		grid_zones.append({"tier": mini(zi + 1, 3), "count": counts[zi]})
+		grid_zones.append({"tier": mini(zi, 3), "count": counts[zi]})
 
 func _stage_prefix(zone: int) -> String:
-	return ["CITY", "OFC", "BNK"][zone]
+	return ["TUT", "CITY", "OFC", "BNK"][zone]
+
+## «боевые» серверы (без обучающей зоны 0) — их 28, они открывают путь к Оракулу
+func facility_total() -> int:
+	return total_nodes() - zone_total(0)
+
+func facility_infected() -> int:
+	return infected_total() - zone_infected(0)
 
 # ── постоянные флаги интерактива Грида ──────────────────────
 
@@ -554,9 +565,9 @@ func stage3_generators_on() -> int:
 			c += 1
 	return c
 
-## этап 3: 28/28 серверов — красная тревога, сирена, туннель к Оракулу
+## этап 3: 28/28 боевых серверов — красная тревога, сирена, туннель к Оракулу
 func red_alert() -> bool:
-	return zone_complete(2)
+	return zone_complete(3)
 
 func oracle_puzzles_done() -> int:
 	return count_flags("opz:")
@@ -622,7 +633,7 @@ func node_unlocked(node: Dictionary) -> bool:
 func node_lock_reason(node: Dictionary) -> String:
 	var z: int = node["zone"]
 	if not zone_open(z):
-		return "взломайте все серверы этапа %d (%d/%d)" % [z, zone_infected(z - 1), zone_total(z - 1)]
+		return "сначала зачистите предыдущий этап (%d/%d)" % [zone_infected(z - 1), zone_total(z - 1)]
 	if node.get("door", "") != "" and not flag("door:" + node["door"]):
 		return "комната заперта — решите головоломку на двери"
 	return ""

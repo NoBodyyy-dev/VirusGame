@@ -51,11 +51,11 @@ const ROOM_GAPS: = {
 ## туннели между этапами: энерго-барьер (открывается по серверам этапа)
 ## и двери-головоломки внутри. opz — зачёт в 15 головоломок Оракула
 const TUNNELS: = [
-	{"key": "t12", "x0": 45.0, "x1": 51.0, "zs": -56.0, "zn": -78.0, "gate_zone": 0, "to": "КО 2 УРОВНЮ",
+	{"key": "t12", "x0": 45.0, "x1": 51.0, "zs": -56.0, "zn": -78.0, "gate_zone": 1, "to": "КО 2 УРОВНЮ",
 		"doors": [{"z": -67.0, "key": "d_t12", "diff": 2, "opz": ""}]},
-	{"key": "t23", "x0": 95.0, "x1": 101.0, "zs": -152.0, "zn": -176.0, "gate_zone": 1, "to": "К 3 УРОВНЮ",
+	{"key": "t23", "x0": 95.0, "x1": 101.0, "zs": -152.0, "zn": -176.0, "gate_zone": 2, "to": "К 3 УРОВНЮ",
 		"doors": [{"z": -161.0, "key": "d_t23a", "diff": 2, "opz": ""}, {"z": -169.0, "key": "d_t23b", "diff": 3, "opz": ""}]},
-	{"key": "t3o", "x0": 119.0, "x1": 125.0, "zs": -264.0, "zn": -290.0, "gate_zone": 2, "to": "К ОРАКУЛУ",
+	{"key": "t3o", "x0": 119.0, "x1": 125.0, "zs": -264.0, "zn": -290.0, "gate_zone": 3, "to": "К ОРАКУЛУ",
 		"doors": [{"z": -272.0, "key": "d_t3oa", "diff": 3, "opz": "opz:1"},
 			{"z": -279.0, "key": "d_t3ob", "diff": 4, "opz": "opz:2"},
 			{"z": -286.0, "key": "d_t3oc", "diff": 4, "opz": "opz:3"}]},
@@ -75,8 +75,9 @@ const PUZZLE_DOORS: = [
 	{"key": "d_s3a", "room": "s3a", "side": "s", "c": 110.0, "w": 3.4, "diff": 3, "power": true, "opz": ""},
 ]
 
-## переносные блоки этапа 1 (лестница к серверу на платформе)
+## переносные блоки: обучение (id 5) + лестница этапа 1
 const BLOCK_DEFAULTS: = [
+	{"id": 5, "pos": Vector3(10.0, 0.75, 13.0), "weight": 1},   # обучение, урок 3
 	{"id": 0, "pos": Vector3(18.0, 0.75, -30.0), "weight": 1},
 	{"id": 1, "pos": Vector3(24.0, 0.75, -44.0), "weight": 1},
 	{"id": 2, "pos": Vector3(30.0, 0.75, -52.0), "weight": 1},
@@ -192,6 +193,7 @@ func _ready() -> void:
 		GameState.new_campaign()
 	_build_environment()
 	_build_rooms()
+	_light_rooms()
 	_build_tunnels()
 	_build_puzzle_doors()
 	_build_stage0()
@@ -269,22 +271,28 @@ func _build_environment() -> void:
 	sky.sky_material = sky_mat
 	env.background_mode = Environment.BG_SKY
 	env.sky = sky
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-	env.ambient_light_energy = 1.0
+	# закрытые комнаты не получают свет неба — держим яркую заливку цветом,
+	# чтобы в помещениях было видно даже без ламп
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color(0.4, 0.46, 0.56)
+	env.ambient_light_energy = 1.7
 	env.tonemap_mode = Environment.TONE_MAPPER_ACES
+	env.tonemap_exposure = 1.15
+	env.tonemap_white = 6.0
 	env.adjustment_enabled = true
-	env.adjustment_contrast = 1.08
+	env.adjustment_contrast = 1.04
+	env.adjustment_brightness = 1.12
 	env.adjustment_saturation = 1.05
 	env.ssao_enabled = true
-	env.ssao_intensity = 1.8
+	env.ssao_intensity = 1.4
 	env.glow_enabled = true
-	env.glow_intensity = 0.85
+	env.glow_intensity = 0.7
 	env.glow_bloom = 0.1
-	env.glow_hdr_threshold = 1.0
+	env.glow_hdr_threshold = 1.1
 	env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SCREEN
 	env.fog_enabled = true
-	env.fog_light_color = Color(0.05, 0.08, 0.14)
-	env.fog_density = 0.0028
+	env.fog_light_color = Color(0.08, 0.11, 0.17)
+	env.fog_density = 0.0016
 	env.fog_sky_affect = 0.0
 	var we: = WorldEnvironment.new()
 	we.environment = env
@@ -492,7 +500,7 @@ func _build_rooms() -> void:
 		_solid(Vector3(WALL_T, DOOR_H, 2.0), pass_mat, Vector3(side * 2.5, DOOR_H * 0.5, -7.0))
 	_solid(Vector3(6.0, 0.5, 2.0), pass_mat, Vector3(0, DOOR_H + 0.25, -7.0))
 	# крупные надписи уровней (как на карте)
-	_stage_title("0 УРОВЕНЬ", Vector3(0, 4.5, 2.0), Color(0.65, 0.75, 0.85))
+	_stage_title("0 УРОВЕНЬ · ОБУЧЕНИЕ", Vector3(0, 7.5, 18.0), Color(0.65, 0.75, 0.85))
 	_stage_title("1 УРОВЕНЬ", Vector3(0, 7.5, -26.0), TIER_COLORS[0])
 	_stage_title("1 УРОВЕНЬ", Vector3(32, 7.5, -41.0), TIER_COLORS[0])
 	_stage_title("2 УРОВЕНЬ", Vector3(47, 8.5, -97.0), TIER_COLORS[1])
@@ -507,6 +515,42 @@ func _stage_title(text: String, pos: Vector3, color: Color) -> void:
 	var l: = _label3d(text, pos, 240, Color(color.r, color.g, color.b, 0.5), true)
 	l.no_depth_test = false
 	l.outline_size = 18
+
+# ── заливающий свет по комнатам (чтобы всё было видно) ──────
+
+func _light_rooms() -> void:
+	## сетка потолочных ламп в каждой комнате: базовая видимость везде.
+	## этап 1 — под открытым небом (свет от фонарей), там заливка не нужна
+	for key in GameState.GRID_ROOMS:
+		var r: Dictionary = GameState.GRID_ROOMS[key]
+		var stage: int = r["stage"]
+		if stage == 1 and not r.get("secret", false):
+			continue
+		var x0: float = r["x0"]
+		var x1: float = r["x1"]
+		var zs: float = r["zs"]
+		var zn: float = r["zn"]
+		var h: float = r["h"]
+		var col: = _fill_color(stage)
+		var energy: = 2.4 if stage == 0 else 1.7
+		var nx: = clampi(int((x1 - x0) / 18.0), 1, 4)
+		var nz: = clampi(int((zs - zn) / 18.0), 1, 4)
+		for ix in nx:
+			for iz in nz:
+				var lx: = lerpf(x0 + 4.0, x1 - 4.0, (float(ix) + 0.5) / float(nx))
+				var lz: = lerpf(zs - 4.0, zn + 4.0, (float(iz) + 0.5) / float(nz))
+				var lp: = Vector3(lx, h - 0.7, lz)
+				# плафон + мягкий заливающий свет (без теней — дёшево)
+				_mesh_box(Vector3(2.4, 0.14, 0.7), _neon(col, 1.4), lp + Vector3(0, 0.35, 0))
+				_omni(lp, col, energy, maxf(h, 9.0) + 8.0)
+
+func _fill_color(stage: int) -> Color:
+	match stage:
+		0: return Color(0.85, 0.92, 1.0)     # обучение — яркий белый
+		2: return Color(0.95, 0.85, 0.65)    # офисы — тёплый затхлый
+		3: return Color(0.7, 0.82, 1.0)      # бункер — холодный
+		4: return Color(0.55, 0.7, 1.0)      # Оракул — синий
+	return Color(0.8, 0.86, 0.95)
 
 # ── туннели между этапами ───────────────────────────────────
 
@@ -570,7 +614,7 @@ func _build_stage_gate(t: Dictionary) -> void:
 	var status: = "ПРОХОД ОТКРЫТ ▸" if done else "ЗАБЛОКИРОВАНО: серверы этапа %d/%d" % [
 		GameState.zone_infected(zone), GameState.zone_total(zone)]
 	if t["key"] == "t3o" and not done:
-		status = "ЗАБЛОКИРОВАНО: активируйте 28 серверов (%d/28)" % GameState.infected_total()
+		status = "ЗАБЛОКИРОВАНО: активируйте 28 серверов (%d/28)" % GameState.facility_infected()
 	_label3d(status, Vector3(cx, DOOR_H + 1.3, gz + 0.6), 34,
 		INFECTED_COLOR if done else Color(gate_col.r, gate_col.g, gate_col.b))
 
@@ -659,29 +703,81 @@ func _open_door(key: String) -> void:
 		_refresh_oracle_shield()
 	_refresh_door_label(key)
 
-# ── этап 0: коробка без интерактива ─────────────────────────
+# ── этап 0: обучающий ангар (3 сервера + базовые механики) ──
 
 func _build_stage0() -> void:
-	# статичные декорации: трубы, ящики, вывеска — и ничего живого
-	var pipe_mat: = Mats.metal(Color(0.42, 0.44, 0.48), 0.5)
-	for i in 2:
-		var pipe: = MeshInstance3D.new()
-		var pc: = CylinderMesh.new()
-		pc.top_radius = 0.18
-		pc.bottom_radius = 0.18
-		pc.height = 16.0
-		pipe.mesh = pc
-		pipe.rotation.z = deg_to_rad(90.0)
-		pipe.material_override = pipe_mat
-		pipe.position = Vector3(0, 5.0 - float(i) * 0.6, 8.6 - float(i) * 0.5)
-		add_child(pipe)
-	_solid(Vector3(1.6, 1.4, 1.6), Mats.plastic(Color(0.4, 0.36, 0.3)), Vector3(-6.5, 0.7, 6.5))
-	_solid(Vector3(1.3, 1.1, 1.3), Mats.plastic(Color(0.35, 0.32, 0.27)), Vector3(-5.2, 0.55, 7.2))
-	_mesh_box(Vector3(5.0, 1.4, 0.2), Mats.metal_dark(0.4), Vector3(0, 3.4, 9.4))
-	_label3d("ГРИД // СЕКТОР 0", Vector3(0, 3.4, 9.2), 42, Color(0.65, 0.8, 0.9), false)
-	_label3d("ПЕРЕХОД НА 1 УРОВЕНЬ ▸", Vector3(0, 4.6, -5.2), 30, TIER_COLORS[0], false)
-	_omni(Vector3(0, 5.0, 2.0), Color(1.0, 0.9, 0.75), 1.4, 14.0)
-	_spot_down(Vector3(0, 5.6, -4.0), Color(0.55, 0.8, 1.0), 2.2, 9.0)
+	## Три сервера учат основам:
+	##  TUT-00 — просто подойти и [E];
+	##  TUT-01 — за дверью-головоломкой (учит «СХЕМУ ВЗЛОМА»);
+	##  TUT-02 — на платформе, куда встаёшь через переносной блок.
+	## Дверь на 1 уровень открывается после захвата всех трёх.
+	var floor_hint: = Mats.plastic(Color(0.4, 0.42, 0.46))
+	# приветственная вывеска у спавна
+	_mesh_box(Vector3(10.0, 2.6, 0.3), Mats.metal_dark(0.4), Vector3(0, 3.6, 38.6))
+	_label3d("ТРЕНИРОВОЧНЫЙ ГРИД", Vector3(0, 4.4, 38.4), 60, Color(0.7, 0.9, 1.0), false)
+	_label3d("захвати 3 сервера — так открой дверь на 1 уровень", Vector3(0, 3.0, 38.4), 26, UIKit.TEAL, false)
+	_label3d("WASD — движение · ПРОБЕЛ — прыжок · Shift — бег · Tab — эволюция", Vector3(0, 2.2, 38.4), 20, UIKit.DIM, false)
+
+	# урок 1: открытый сервер
+	_tut_sign("УРОК 1 · подойди к серверу и держи [E]", Vector3(0, 3.4, 22.0), UIKit.TEAL)
+	_tut_arrow(Vector3(0, 0.15, 20.0))
+
+	# урок 2: сервер за дверью-головоломкой в отгороженном отсеке (СЗ угол)
+	var part_mat: = Mats.metal(Color(0.4, 0.42, 0.46), 0.5)
+	_solid(Vector3(16.0, DOOR_H, WALL_T), part_mat, Vector3(-16.0, DOOR_H * 0.5, 8.0))   # южная перегородка отсека
+	# восточная перегородка x=-8 с проёмом под дверь (проём z∈[-0.7, 2.7])
+	_solid(Vector3(WALL_T, DOOR_H, 5.3), part_mat, Vector3(-8.0, DOOR_H * 0.5, 5.35))    # z 2.7..8
+	_solid(Vector3(WALL_T, DOOR_H, 5.3), part_mat, Vector3(-8.0, DOOR_H * 0.5, -3.35))   # z -6..-0.7
+	_make_door("d_tut", Vector3(-8.0, 0, 1.0), 3.4, "z", 1, false, "", part_mat)
+	_tut_sign("УРОК 2 · дверь заперта — реши головоломку [E]", Vector3(-8.0, 3.4, 4.0), Color(1.0, 0.7, 0.35))
+	_omni(Vector3(-16.0, 6.0, 0.0), Color(0.85, 0.92, 1.0), 2.2, 16.0)  # свет в отсеке
+
+	# урок 3: сервер на платформе — поднеси блок и запрыгни
+	_solid(Vector3(5.0, 2.6, 5.0), Mats.deck_metal(), Vector3(14.0, 1.3, 8.0))
+	_mesh_box(Vector3(5.2, 0.08, 5.2), _neon(TIER_COLORS[0], 0.8), Vector3(14.0, 2.65, 8.0))
+	_tut_sign("УРОК 3 · поднеси блок [E], встань на него и запрыгни", Vector3(14.0, 4.2, 8.0), Color(0.8, 0.9, 1.0))
+	_tut_arrow(Vector3(11.0, 0.15, 14.0))
+
+	# дверь-барьер на 1 уровень (в проёме северной стены), открыта после зоны 0
+	_build_tutorial_exit_gate()
+
+func _tut_sign(text: String, pos: Vector3, color: Color) -> void:
+	_mesh_box(Vector3(0.25, 1.6, 0.25), Mats.metal_dark(0.4), Vector3(pos.x, pos.y * 0.5, pos.z))
+	_label3d(text, pos, 26, color)
+
+func _tut_arrow(pos: Vector3) -> void:
+	var arrow: = MeshInstance3D.new()
+	var pm: = PrismMesh.new()
+	pm.size = Vector3(1.6, 0.08, 1.4)
+	arrow.mesh = pm
+	arrow.material_override = _neon(UIKit.TEAL, 0.9)
+	arrow.position = pos
+	arrow.rotation_degrees = Vector3(90, 180, 0)
+	add_child(arrow)
+
+func _build_tutorial_exit_gate() -> void:
+	## барьер на выходе к 1 уровню; открыт, когда взломаны все 3 обучающих сервера
+	var done: = GameState.zone_complete(0)
+	var gz: = -6.0
+	var gw: = 4.0
+	var gate_mat: = StandardMaterial3D.new()
+	gate_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	gate_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	gate_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	gate_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	gate_mat.albedo_color = Color(0.2, 0.55, 1.0, 0.08 if done else 0.3)
+	_mesh_box(Vector3(gw, DOOR_H, 0.3), gate_mat, Vector3(0, DOOR_H * 0.5, gz))
+	for side in [-1.0, 1.0]:
+		_mesh_box(Vector3(0.25, DOOR_H + 0.3, 0.4), _neon(Color(0.25, 0.6, 1.0), 2.2), Vector3(side * (gw * 0.5 + 0.1), DOOR_H * 0.5, gz))
+	_mesh_box(Vector3(gw + 0.5, 0.25, 0.4), _neon(Color(0.25, 0.6, 1.0), 2.2), Vector3(0, DOOR_H + 0.15, gz))
+	_omni(Vector3(0, 3.0, gz + 1.5), Color(0.25, 0.6, 1.0), 1.8, 10.0)
+	if not done:
+		gates.append({"labels": [
+			_label3d(_random_code(), Vector3(0, 2.2, gz + 0.3), 22, Color(0.5, 0.8, 1.0, 0.85), false)],
+			"mat": gate_mat})
+		_collide(Vector3(gw, DOOR_H, 0.4), Vector3(0, DOOR_H * 0.5, gz))
+	var status: = "ПРОХОД ОТКРЫТ ▸ 1 УРОВЕНЬ" if done else "ЗАБЛОКИРОВАНО: серверы %d/3" % GameState.zone_infected(0)
+	_label3d(status, Vector3(0, DOOR_H + 1.2, gz + 0.6), 32, INFECTED_COLOR if done else Color(0.5, 0.8, 1.0))
 
 # ── этап 1: ночной мегаполис ────────────────────────────────
 
@@ -1851,10 +1947,10 @@ func _build_motes() -> void:
 
 func _spawn_player() -> void:
 	player = VirusPlayer.new()
-	var spawn: = Vector3(0, 0.3, 4.0)
+	var spawn: = Vector3(0, 0.3, 32.0)   # обучающий ангар, лицом к серверам
 	if not GameState.current_node.is_empty():
 		var np: Vector3 = GameState.current_node["pos"]
-		spawn = Vector3(np.x, 0.3, np.z + 4.0)
+		spawn = Vector3(np.x, np.y + 0.3, np.z + 4.0)
 	player.position = spawn
 	add_child(player)
 
