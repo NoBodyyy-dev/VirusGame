@@ -1,0 +1,14 @@
+# Unity-генерируемое
+VirusGame/[Ll]ibrary/
+VirusGame/[Tt]emp/
+VirusGame/[Oo]bj/
+VirusGame/[Bb]uild/
+VirusGame/[Bb]uilds/
+VirusGame/[Ll]ogs/
+VirusGame/[Uu]serSettings/
+VirusGame/*.csproj
+VirusGame/*.sln
+
+# офлайн-проверка ядра через dotnet
+_verify/bin/
+_verify/obj/
