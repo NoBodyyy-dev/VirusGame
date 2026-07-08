@@ -201,6 +201,7 @@ func _ready() -> void:
 	_build_oracle()
 	_build_nodes()
 	_build_motes()
+	_optimize_scene()
 	_spawn_player()
 	_build_ui()
 	_apply_stage3_power()
@@ -294,7 +295,34 @@ func _build_environment() -> void:
 	moon.light_color = Color(0.55, 0.65, 0.88)
 	moon.light_energy = 0.32
 	moon.shadow_enabled = true
+	# тени луны только рядом с игроком — карта огромная, дальше не нужно
+	moon.directional_shadow_max_distance = 75.0
 	add_child(moon)
+
+# ── оптимизация: дальнее отсечение ──────────────────────────
+
+const CULL_MESH: = 170.0    # декор дальше не рисуем (скрыто туманом/стенами)
+const CULL_LABEL: = 130.0
+const CULL_TITLE: = 340.0   # крупные надписи уровней видны издалека
+
+func _optimize_scene() -> void:
+	## Грид — одна огромная сцена: без отсечения рисуются ВСЕ комнаты сразу.
+	## Меши и свет за порогом дистанции выключаются (вызвать до спавна игрока)
+	_apply_culling(self)
+
+func _apply_culling(node: Node) -> void:
+	for child in node.get_children():
+		_apply_culling(child)
+	if node is Label3D:
+		node.visibility_range_end = CULL_TITLE if node.font_size >= 150 else CULL_LABEL
+	elif node is GeometryInstance3D:
+		if node.visibility_range_end == 0.0:
+			node.visibility_range_end = CULL_MESH
+	elif node is OmniLight3D or node is SpotLight3D:
+		node.distance_fade_enabled = true
+		node.distance_fade_begin = 55.0
+		node.distance_fade_length = 25.0
+		node.distance_fade_shadow = 45.0
 
 # ── геометрические хелперы ──────────────────────────────────
 
@@ -725,6 +753,8 @@ func _build_city_rain() -> void:
 	quad.material = qm
 	parts.draw_pass_1 = quad
 	parts.position = Vector3(17.0, 13.0, -32.0)
+	# AABB на весь объём дождя — иначе он гаснет, когда центр вне кадра
+	parts.visibility_aabb = AABB(Vector3(-42, -24, -34), Vector3(84, 28, 68))
 	add_child(parts)
 
 func _street_lamp(pos: Vector3) -> void:
@@ -926,6 +956,9 @@ func _office_decay(room: String, rng: RandomNumberGenerator) -> void:
 	quad.material = qmat
 	parts.draw_pass_1 = quad
 	parts.position = Vector3((r["x0"] + r["x1"]) * 0.5, h * 0.5, (r["zs"] + r["zn"]) * 0.5)
+	var hx: float = (r["x1"] - r["x0"]) * 0.5 + 2.0
+	var hz: float = (r["zs"] - r["zn"]) * 0.5 + 2.0
+	parts.visibility_aabb = AABB(Vector3(-hx, -h * 0.5, -hz), Vector3(hx * 2.0, h + 2.0, hz * 2.0))
 	add_child(parts)
 
 func _flicker_lamp(pos: Vector3) -> void:
@@ -2294,7 +2327,7 @@ func _interaction_tick(delta: float) -> void:
 			else:
 				hud.set_prompt("[E] ДВЕРЬ: решить головоломку взлома")
 				if just:
-					var door_key: = key
+					var door_key: String = key
 					_open_puzzle(d["diff"], "СХЕМА ВЗЛОМА ДВЕРИ", func() -> void:
 						_open_door(door_key)
 						_refresh_nodes_behind_door(door_key))
@@ -2405,7 +2438,7 @@ func _interaction_tick(delta: float) -> void:
 		if pp.distance_to(py["pos"]) < 2.8:
 			hud.set_prompt("[E] ГОЛОВОЛОМКА ОРАКУЛА %s/15" % key.trim_prefix("opz:"))
 			if just:
-				var pylon_key: = key
+				var pylon_key: String = key
 				_open_puzzle(py["diff"], "ГОЛОВОЛОМКА ОРАКУЛА", func() -> void:
 					_solve_pylon(pylon_key))
 			return
