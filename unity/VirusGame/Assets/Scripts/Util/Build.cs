@@ -1,5 +1,4 @@
 using UnityEngine;
-using TMPro;
 
 namespace Virus.Util
 {
@@ -50,20 +49,42 @@ namespace Virus.Util
             Collide(parent, size, pos);
         }
 
-        public static TextMeshPro Label(Transform parent, string text, Vector3 pos, float size,
-                                        Color color, bool billboard = true)
+        // Шрифт ОС в рантайме — не требует импортированных TMP-ассетов, работает
+        // и в сборке. Шейдер "GUI/Text Shader" включаем в билд (см. UnityBuild).
+        static Font _font;
+        public static Font UIFont
+        {
+            get
+            {
+                if (_font == null)
+                {
+                    _font = Font.CreateDynamicFontFromOSFont("Arial", 40)
+                         ?? Font.CreateDynamicFontFromOSFont(
+                                new[] { "Segoe UI", "Tahoma", "Verdana", "Liberation Sans" }, 40);
+                }
+                return _font;
+            }
+        }
+
+        // 3D-метка в мире (порт Label3D) на legacy TextMesh.
+        public static TextMesh Label(Transform parent, string text, Vector3 pos, float size,
+                                     Color color, bool billboard = true)
         {
             var go = new GameObject("label");
             go.transform.SetParent(parent, false);
             go.transform.localPosition = pos;
-            var t = go.AddComponent<TextMeshPro>();
-            t.text = text;
-            t.fontSize = size;
-            t.color = color;
-            t.alignment = TextAlignmentOptions.Center;
-            t.rectTransform.sizeDelta = new Vector2(20, 4);
+            var tm = go.AddComponent<TextMesh>();
+            tm.font = UIFont;
+            tm.text = text;
+            tm.fontSize = 40;
+            tm.characterSize = size * 0.08f;    // перевод «размера шрифта» в масштаб мира
+            tm.anchor = TextAnchor.MiddleCenter;
+            tm.alignment = TextAlignment.Center;
+            tm.color = color;
+            var mr = go.GetComponent<MeshRenderer>();
+            if (mr != null && UIFont != null) mr.sharedMaterial = UIFont.material;
             if (billboard) go.AddComponent<Billboard>();
-            return t;
+            return tm;
         }
 
         public static Light Omni(Transform parent, Vector3 pos, Color color, float energy, float range)

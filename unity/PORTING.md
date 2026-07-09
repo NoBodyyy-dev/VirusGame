@@ -22,21 +22,39 @@
 | `Core/GameData.cs` | таблицы game_state.gd (TIERS, ROOMS, SERVERS, цвета) | ✅ верифицировано |
 | `Core/GameState.cs` | правила: кампания, зоны, флаги, Оракул, конфиг рейда | ✅ верифицировано |
 
-## Что портировано, но НЕ скомпилировано (Unity на машине нет)
+## Что СОБРАНО и ЗАПУЩЕНО на Unity 6000.3.19f1
 
-Написано по конвенциям Unity 6/URP, требует редактора для проверки:
+Проект открыт в реальном Unity, скомпилирован (0 ошибок) и **собран в
+Standalone-плеер, который запускается с нуля исключений** (Player.log чист,
+Direct3D 11, мир строится, игрок/камера спавнятся, HUD и текст рисуются).
+Рендер — встроенный конвейер (без URP-ассета); материалы Mats работают и там.
 
 | Файл | Из Godot | Примечание |
 |---|---|---|
 | `Core/GameStateBehaviour.cs` | автолоад GameState | синглтон + DontDestroyOnLoad |
-| `Util/Mats.cs` | mats.gd | StandardMaterial3D→URP Lit; NoiseTexture→Texture2D в коде |
-| `Util/Build.cs` | хелперы _mesh_box/_collide/_label3d/_omni | GameObject+компоненты |
+| `Util/Mats.cs` | mats.gd | материалы через Standard-шейдер (RP-агностик), NoiseTexture→PerlinNoise |
+| `Util/Build.cs` | хелперы _mesh_box/_collide/_label3d/_omni | GameObject+компоненты; текст на legacy `TextMesh` + шрифт ОС |
 | `Util/Interactable.cs` | взаимодействие по дистанции + [E] | компонент + менеджер |
 | `Player/VirusPlayer.cs` | player.gd | CharacterController (move_and_slide→Move) |
 | `World/GridWorld.cs` | grid_world.gd (каркас) | комнаты, обучение, серверы, вход |
-| `UI/Hud.cs` | grid_hud.gd | uGUI + TextMeshPro |
+| `UI/Hud.cs` | grid_hud.gd | uGUI `UnityEngine.UI.Text` + шрифт ОС |
 | `App/Boot.cs`, `App/SceneFlow.cs` | _ready / change_scene | бутстрап и переходы |
 | `Net/NetStub.cs` | net.gd | ЗАГЛУШКА (см. ниже) |
+| `Editor/UnityBuild.cs` | — | headless-сборка: сцена+Build Settings, always-included `Standard`, билд плеера |
+
+### Как собрать/запустить из командной строки (batchmode, без GUI)
+```
+UNITY="C:/Program Files/Unity/Hub/Editor/6000.3.19f1/Editor/Unity.exe"
+"$UNITY" -batchmode -quit -nographics -projectPath unity/VirusGame \
+  -executeMethod Virus.EditorTools.UnityBuild.BuildWindows -logFile -
+# → unity/Build/VirusUnity.exe
+```
+
+### Известные ограничения текущего среза (не баги сборки)
+- Рендер на встроенном конвейере: нет SSAO/SSR/bloom/объёмного тумана (это URP).
+- Материалы на Standard: без триплана и без реалистичных шумовых текстур Godot.
+- Построен только каркас Грида + обучающий этап 0; вход в сервер грузит сцену
+  `Level`, которой пока нет (см. стадии ниже).
 
 ## Ещё НЕ портировано (стадии дальше)
 

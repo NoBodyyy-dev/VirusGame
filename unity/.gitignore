@@ -9,6 +9,9 @@ VirusGame/[Uu]serSettings/
 VirusGame/*.csproj
 VirusGame/*.sln
 
+# собранный плеер
+Build/
+
 # офлайн-проверка ядра через dotnet
 _verify/bin/
 _verify/obj/

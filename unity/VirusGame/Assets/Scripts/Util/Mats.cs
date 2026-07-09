@@ -8,8 +8,24 @@ namespace Virus.Util
     // «настоящего» триплана нужен Shader Graph (см. PORTING.md).
     public static class Mats
     {
+        // Работает и в URP, и во встроенном конвейере: если URP-ассет не назначен,
+        // Shader.Find("URP/Lit")==null → падаем на встроенный Standard. Имена
+        // свойств у них разные — учитываем через _urp.
         static Shader _lit;
-        static Shader Lit => _lit ??= Shader.Find("Universal Render Pipeline/Lit");
+        static bool _urp;
+        static Shader Lit
+        {
+            get
+            {
+                if (_lit == null)
+                {
+                    _lit = Shader.Find("Universal Render Pipeline/Lit");
+                    _urp = _lit != null;
+                    if (_lit == null) _lit = Shader.Find("Standard");
+                }
+                return _lit;
+            }
+        }
 
         static readonly System.Collections.Generic.Dictionary<string, Texture2D> _texCache = new();
 
@@ -38,24 +54,34 @@ namespace Virus.Util
             return tex;
         }
 
+        static void SetAlbedo(Material m, Color c) { m.SetColor(_urp ? "_BaseColor" : "_Color", c); }
+        static void SetTex(Material m, Texture t, float tile)
+        {
+            string p = _urp ? "_BaseMap" : "_MainTex";
+            m.SetTexture(p, t);
+            m.SetTextureScale(p, new Vector2(tile, tile));
+        }
+        static void SetSmooth(Material m, float metallic, float smoothness)
+        {
+            m.SetFloat("_Metallic", metallic);
+            m.SetFloat(_urp ? "_Smoothness" : "_Glossiness", smoothness);
+        }
+
         static Material Base(Color albedo, float metallic, float smoothness, string noiseKey, int seed, float freq, float tile)
         {
+            _ = Lit;                       // инициализировать _urp
             var m = new Material(Lit);
-            m.SetColor("_BaseColor", albedo);
-            m.SetFloat("_Metallic", metallic);
-            m.SetFloat("_Smoothness", smoothness);
-            if (noiseKey != null)
-            {
-                m.SetTexture("_BaseMap", Noise(noiseKey, seed, freq));
-                m.SetTextureScale("_BaseMap", new Vector2(tile, tile));
-            }
+            SetAlbedo(m, albedo);
+            SetSmooth(m, metallic, smoothness);
+            if (noiseKey != null) SetTex(m, Noise(noiseKey, seed, freq), tile);
             return m;
         }
 
         public static Material Neon(Color c, float energy = 1.8f)
         {
+            _ = Lit;
             var m = new Material(Lit);
-            m.SetColor("_BaseColor", new Color(0.02f, 0.03f, 0.05f));
+            SetAlbedo(m, new Color(0.02f, 0.03f, 0.05f));
             m.EnableKeyword("_EMISSION");
             m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
             m.SetColor("_EmissionColor", new Color(c.r, c.g, c.b) * energy);
