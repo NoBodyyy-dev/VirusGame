@@ -46,7 +46,10 @@ namespace Virus.Util
                         v += amp * Mathf.PerlinNoise((x * f + seed) , (y * f + seed));
                         amp *= 0.5f; f *= 2f;
                     }
-                    px[y * N + x] = new Color(v, v, v);
+                    // текстура МНОЖИТ цвет материала: держим её светлой (0.68..1.0),
+                    // иначе всё выходит вдвое темнее задуманного тинта
+                    float c = Mathf.Clamp01(0.68f + v * 0.36f);
+                    px[y * N + x] = new Color(c, c, c);
                 }
             tex.SetPixels(px);
             tex.Apply();
@@ -73,7 +76,9 @@ namespace Virus.Util
             var m = new Material(Lit);
             SetAlbedo(m, albedo);
             SetSmooth(m, metallic, smoothness);
-            if (noiseKey != null) SetTex(m, Noise(noiseKey, seed, freq), tile);
+            // у Godot был триплан в мировых координатах; тут UV 0..1 на грань
+            // скейленного куба — умножаем тайлинг, чтобы фактура не размазывалась
+            if (noiseKey != null) SetTex(m, Noise(noiseKey, seed, freq), tile * 12f);
             return m;
         }
 

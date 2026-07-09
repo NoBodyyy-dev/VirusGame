@@ -31,18 +31,41 @@ namespace Virus.World
             SpawnPlayer();
         }
 
-        // ── окружение (URP Volume — в TODO; здесь базовый свет + ambient) ──
+        // ── окружение: ночной город (луна, градиентный амбиент, скайбокс) ──
         void BuildEnvironment()
         {
+            // качество: без этого большинство точечных ламп падают в vertex-lit
+            QualitySettings.pixelLightCount = 10;
+            QualitySettings.shadowDistance = 70f;
+            QualitySettings.antiAliasing = 4;
+
             var sun = new GameObject("Moon").AddComponent<Light>();
             sun.type = LightType.Directional;
             sun.color = new Color(0.55f, 0.65f, 0.88f);
-            sun.intensity = 0.6f;
+            sun.intensity = 0.65f;
             sun.transform.rotation = Quaternion.Euler(55, -35, 0);
             sun.shadows = LightShadows.Soft;
+            sun.shadowStrength = 0.75f;
 
-            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Flat;
-            RenderSettings.ambientLight = new Color(0.4f, 0.46f, 0.56f) * 1.7f;
+            // градиентный амбиент: небо/горизонт/земля — объёмнее плоского
+            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
+            RenderSettings.ambientSkyColor = new Color(0.38f, 0.45f, 0.60f);
+            RenderSettings.ambientEquatorColor = new Color(0.32f, 0.35f, 0.42f);
+            RenderSettings.ambientGroundColor = new Color(0.14f, 0.15f, 0.18f);
+
+            // ночное небо (если шейдер не попал в билд — останется solid color)
+            var skyShader = Shader.Find("Skybox/Procedural");
+            if (skyShader != null)
+            {
+                var sky = new Material(skyShader);
+                sky.SetFloat("_SunSize", 0.025f);
+                sky.SetFloat("_AtmosphereThickness", 0.5f);
+                sky.SetFloat("_Exposure", 0.4f);
+                sky.SetColor("_SkyTint", new Color(0.12f, 0.16f, 0.3f));
+                sky.SetColor("_GroundColor", new Color(0.02f, 0.03f, 0.05f));
+                RenderSettings.skybox = sky;
+            }
+
             RenderSettings.fog = true;
             RenderSettings.fogColor = new Color(0.08f, 0.11f, 0.17f);
             RenderSettings.fogMode = FogMode.Exponential;
@@ -215,7 +238,14 @@ namespace Virus.World
                     var it = trig.AddComponent<Interactable>();
                     var node = n;
                     it.prompt = $"[E] ВЗЛОМ СЕРВЕРА: {n.name}";
-                    it.onInteract = () => { S.StartHack(node); App.SceneFlow.EnterRaid(); };
+                    // ВРЕМЕННО (пока не портирован рейд level.gd): мгновенный
+                    // успешный взлом + перезагрузка Грида (двери/барьеры обновятся)
+                    it.onInteract = () =>
+                    {
+                        S.StartHack(node);
+                        S.FinishHack(true);
+                        App.SceneFlow.ReloadGrid();
+                    };
                 }
             }
         }

@@ -16,5 +16,10 @@ namespace Virus.App
         public static void GoGrid()  => SceneManager.LoadScene(Grid);
         public static void EnterRaid() => SceneManager.LoadScene(Raid);
         public static void GoVictory() => SceneManager.LoadScene(Victory);
+
+        /// Перезагрузка текущей сцены Грида (после «рейда» мир перестраивается
+        /// с новым прогрессом — как в Godot при возврате из level.tscn).
+        public static void ReloadGrid() =>
+            SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
     }
 }
