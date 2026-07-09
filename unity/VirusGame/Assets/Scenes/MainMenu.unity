@@ -119,6 +119,21 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
+--- !u!115 &396049110
+MonoScript:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: 
+  serializedVersion: 7
+  m_DefaultReferences: {}
+  m_Icon: {fileID: 0}
+  m_Type: 0
+  m_ExecutionOrder: 0
+  m_ClassName: MenuBoot
+  m_Namespace: Virus.App
+  m_AssemblyName: Assembly-CSharp
 --- !u!1 &567454604
 GameObject:
   m_ObjectHideFlags: 0
@@ -145,9 +160,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 567454604}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d8b7654ef7a7ae34ba08060a15059a1d, type: 3}
+  m_Script: {fileID: 396049110}
   m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::Virus.App.Boot
+  m_EditorClassIdentifier: Assembly-CSharp::Virus.App.MenuBoot
 --- !u!4 &567454606
 Transform:
   m_ObjectHideFlags: 0

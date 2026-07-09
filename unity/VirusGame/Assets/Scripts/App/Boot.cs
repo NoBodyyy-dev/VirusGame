@@ -1,24 +1,144 @@
 using UnityEngine;
+using UnityEngine.UI;
 using Virus.Core;
 using Virus.Util;
-using Virus.World;
 
 namespace Virus.App
 {
-    // Единая точка входа сцены GridWorld: поднимает синглтон GameState (если его
-    // ещё нет), строит мир, HUD и менеджер взаимодействий. В финальном проекте
-    // часть этого выносится в сцены-ассеты, но процедурный подход Godot сохранён.
+    // Бутстрапы сцен (порт _ready корневых нод Godot): каждый строит свою
+    // сцену процедурно. GameState — персистентный синглтон.
+    static class BootCommon
+    {
+        public static void EnsureState()
+        {
+            if (GameStateBehaviour.I == null)
+                new GameObject("GameState", typeof(GameStateBehaviour));
+            // кнопки uGUI (головоломка, результаты, меню) требуют EventSystem
+            if (Object.FindFirstObjectByType<UnityEngine.EventSystems.EventSystem>() == null)
+                new GameObject("EventSystem", typeof(UnityEngine.EventSystems.EventSystem),
+                    typeof(UnityEngine.EventSystems.StandaloneInputModule));
+        }
+
+        public static UI.Hud Hud(bool raid = false)
+        {
+            var hud = new GameObject("HUD", typeof(UI.Hud)).GetComponent<UI.Hud>();
+            hud.raidMode = raid;
+            var im = new GameObject("Interactions", typeof(InteractionManager)).GetComponent<InteractionManager>();
+            im.setPrompt = hud.SetPrompt;
+            return hud;
+        }
+    }
+
+    // Сцена GridWorld
     public class Boot : MonoBehaviour
     {
         void Awake()
         {
-            if (GameStateBehaviour.I == null)
-                new GameObject("GameState", typeof(GameStateBehaviour));
+            BootCommon.EnsureState();
+            BootCommon.Hud();
+            new GameObject("GridWorld", typeof(World.GridWorld));
+        }
+    }
 
-            var hud = new GameObject("HUD", typeof(UI.Hud)).GetComponent<UI.Hud>();
-            var world = new GameObject("GridWorld", typeof(GridWorld));
-            var im = new GameObject("Interactions", typeof(InteractionManager)).GetComponent<InteractionManager>();
-            im.hud = hud;
+    // Сцена Level (рейд)
+    public class LevelBoot : MonoBehaviour
+    {
+        void Awake()
+        {
+            BootCommon.EnsureState();
+            BootCommon.Hud(raid: true);
+            new GameObject("Level", typeof(World.Level));
+        }
+    }
+
+    // Сцена VictoryTunnel
+    public class VictoryBoot : MonoBehaviour
+    {
+        void Awake()
+        {
+            BootCommon.EnsureState();
+            BootCommon.Hud();
+            new GameObject("VictoryTunnel", typeof(World.VictoryTunnel));
+        }
+    }
+
+    // Сцена MainMenu: сюжет и старт кампании
+    public class MenuBoot : MonoBehaviour
+    {
+        void Awake()
+        {
+            BootCommon.EnsureState();
+
+            // отладочный автозапуск сцен (аналог autostart-аргументов Godot)
+            var args = System.Environment.GetCommandLineArgs();
+            if (System.Array.IndexOf(args, "-autogrid") >= 0)
+            { GameState.I.NewCampaign(); SceneFlow.GoGrid(); return; }
+            if (System.Array.IndexOf(args, "-autoraid") >= 0)
+            { GameState.I.NewCampaign(); GameState.I.StartHack(GameState.I.gridNodes[0]); SceneFlow.EnterRaid(); return; }
+            if (System.Array.IndexOf(args, "-autovictory") >= 0)
+            { GameState.I.NewCampaign(); SceneFlow.GoVictory(); return; }
+
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+
+            var cam = new GameObject("Camera", typeof(Camera));
+            cam.tag = "MainCamera";
+            cam.GetComponent<Camera>().clearFlags = CameraClearFlags.SolidColor;
+            cam.GetComponent<Camera>().backgroundColor = new Color(0.012f, 0.02f, 0.045f);
+
+            var canvasGo = new GameObject("Menu", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+            canvasGo.GetComponent<Canvas>().renderMode = RenderMode.ScreenSpaceOverlay;
+            var scaler = canvasGo.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1600, 900);
+
+            // курсорные события UI требуют EventSystem — добавляем
+            if (FindFirstObjectByType<UnityEngine.EventSystems.EventSystem>() == null)
+                new GameObject("EventSystem", typeof(UnityEngine.EventSystems.EventSystem),
+                    typeof(UnityEngine.EventSystems.StandaloneInputModule));
+
+            T(canvasGo.transform, "VIRUS // PANIC PROTOCOL", new Vector2(0, 220), 56, new Color(0.21f, 0.85f, 1f));
+            T(canvasGo.transform,
+                "Ты — полиморфный вирус, проснувшийся в тренировочном Гриде.\n" +
+                "Впереди: ночной мегаполис, затхлые офисы и военный бункер — 28 серверов,\n" +
+                "которые нужно заразить, чтобы открыть путь к ОРАКУЛУ — ядру всей сети.\n" +
+                "Укради его данные, разрушь сервер и сбеги в белый туннель.",
+                new Vector2(0, 110), 21, new Color(0.6f, 0.75f, 0.85f));
+
+            Btn(canvasGo.transform, "НОВАЯ КАМПАНИЯ", new Vector2(0, -30), () =>
+            {
+                GameState.I.NewCampaign();
+                SceneFlow.GoGrid();
+            });
+            if (GameState.I.gridNodes.Count > 0 && GameState.I.InfectedTotal() > 0 && !GameState.I.campaignWon)
+                Btn(canvasGo.transform, "ПРОДОЛЖИТЬ", new Vector2(0, -100), SceneFlow.GoGrid);
+            Btn(canvasGo.transform, "ВЫХОД", new Vector2(0, -170), Application.Quit);
+        }
+
+        static void T(Transform parent, string s, Vector2 pos, int size, Color c)
+        {
+            var go = new GameObject("t", typeof(RectTransform));
+            go.transform.SetParent(parent, false);
+            var t = go.AddComponent<Text>();
+            t.font = Build.UIFont; t.text = s; t.fontSize = size; t.color = c;
+            t.alignment = TextAnchor.MiddleCenter;
+            t.horizontalOverflow = HorizontalWrapMode.Overflow;
+            t.verticalOverflow = VerticalWrapMode.Overflow;
+            t.rectTransform.anchoredPosition = pos;
+            t.rectTransform.sizeDelta = new Vector2(1400, 140);
+        }
+
+        static void Btn(Transform parent, string label, Vector2 pos, UnityEngine.Events.UnityAction action)
+        {
+            var go = new GameObject("btn", typeof(RectTransform));
+            go.transform.SetParent(parent, false);
+            var rt = go.GetComponent<RectTransform>();
+            rt.sizeDelta = new Vector2(380, 54);
+            rt.anchoredPosition = pos;
+            go.AddComponent<Image>().color = new Color(0.03f, 0.1f, 0.16f, 0.95f);
+            var btn = go.AddComponent<Button>();
+            btn.onClick.AddListener(action);
+            T(go.transform, label, Vector2.zero, 24, new Color(0.21f, 0.85f, 1f));
         }
     }
 }

@@ -16,19 +16,30 @@ namespace Virus.EditorTools
     // материалы Mats работают и там, и там).
     public static class UnityBuild
     {
+        static void MakeScene(string name, System.Type bootType)
+        {
+            var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+            new GameObject("Boot", bootType);
+            EditorSceneManager.SaveScene(scene, $"Assets/Scenes/{name}.unity");
+        }
+
         [MenuItem("Virus/Setup Scene")]
         public static void SetupScene()
         {
             Directory.CreateDirectory("Assets/Scenes");
-            var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-            new GameObject("Boot", typeof(Virus.App.Boot));
-            EditorSceneManager.SaveScene(scene, "Assets/Scenes/GridWorld.unity");
+            MakeScene("MainMenu", typeof(Virus.App.MenuBoot));
+            MakeScene("GridWorld", typeof(Virus.App.Boot));
+            MakeScene("Level", typeof(Virus.App.LevelBoot));
+            MakeScene("VictoryTunnel", typeof(Virus.App.VictoryBoot));
             EditorBuildSettings.scenes = new[]
             {
+                new EditorBuildSettingsScene("Assets/Scenes/MainMenu.unity", true),
                 new EditorBuildSettingsScene("Assets/Scenes/GridWorld.unity", true),
+                new EditorBuildSettingsScene("Assets/Scenes/Level.unity", true),
+                new EditorBuildSettingsScene("Assets/Scenes/VictoryTunnel.unity", true),
             };
             AssetDatabase.SaveAssets();
-            Debug.Log("[VirusBuild] scene ready");
+            Debug.Log("[VirusBuild] scenes ready");
         }
 
         static void EnsureShaderIncluded(string shaderName)
@@ -99,7 +110,13 @@ namespace Virus.EditorTools
             Directory.CreateDirectory(dir);
             var opts = new BuildPlayerOptions
             {
-                scenes = new[] { "Assets/Scenes/GridWorld.unity" },
+                scenes = new[]
+                {
+                    "Assets/Scenes/MainMenu.unity",
+                    "Assets/Scenes/GridWorld.unity",
+                    "Assets/Scenes/Level.unity",
+                    "Assets/Scenes/VictoryTunnel.unity",
+                },
                 locationPathName = Path.Combine(dir, "VirusUnity.exe"),
                 target = BuildTarget.StandaloneWindows64,
                 options = BuildOptions.None,

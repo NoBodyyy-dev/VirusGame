@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using UnityEngine.UI;
 using Virus.Core;
@@ -5,10 +6,14 @@ using Virus.Util;
 
 namespace Virus.UI
 {
-    // Порт grid_hud.gd: экранный HUD на uGUI (legacy Text + шрифт ОС, без TMP).
+    // Порт grid_hud.gd + hud.gd (рейд): ресурсы, прогресс, подсказка [E],
+    // тосты, цель; в рейде — полосы ДОБЫЧА/ТРЕВОГА и HP.
     public class Hud : MonoBehaviour
     {
-        Text _prompt, _res, _progress;
+        public bool raidMode = false;
+
+        Text _prompt, _res, _progress, _toast, _objective, _bars;
+        float _toastT;
 
         void Awake()
         {
@@ -19,12 +24,16 @@ namespace Virus.UI
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
             scaler.referenceResolution = new Vector2(1600, 900);
 
-            _res      = MakeText(canvasGo.transform, new Vector2(0, 0),   new Vector2(0, 0), TextAnchor.LowerLeft, 20);
-            _progress = MakeText(canvasGo.transform, new Vector2(0, 1),   new Vector2(0, 1), TextAnchor.UpperLeft, 20);
-            _prompt   = MakeText(canvasGo.transform, new Vector2(0.5f, 0),new Vector2(0.5f, 0), TextAnchor.LowerCenter, 26);
+            _res       = MakeText(canvasGo.transform, new Vector2(0, 0), TextAnchor.LowerLeft, 20, new Vector2(28, 28));
+            _progress  = MakeText(canvasGo.transform, new Vector2(0, 1), TextAnchor.UpperLeft, 20, new Vector2(28, -28));
+            _bars      = MakeText(canvasGo.transform, new Vector2(0, 1), TextAnchor.UpperLeft, 22, new Vector2(28, -58));
+            _objective = MakeText(canvasGo.transform, new Vector2(0.5f, 1), TextAnchor.UpperCenter, 20, new Vector2(0, -24));
+            _prompt    = MakeText(canvasGo.transform, new Vector2(0.5f, 0), TextAnchor.LowerCenter, 26, new Vector2(0, 96));
+            _toast     = MakeText(canvasGo.transform, new Vector2(0.5f, 1), TextAnchor.UpperCenter, 24, new Vector2(0, -110));
+            _toast.color = new Color(0.16f, 0.95f, 0.75f);
         }
 
-        static Text MakeText(Transform parent, Vector2 anchorMin, Vector2 anchorMax, TextAnchor align, int size)
+        static Text MakeText(Transform parent, Vector2 anchor, TextAnchor align, int size, Vector2 offset)
         {
             var go = new GameObject("txt", typeof(RectTransform));
             go.transform.SetParent(parent, false);
@@ -36,10 +45,10 @@ namespace Virus.UI
             t.horizontalOverflow = HorizontalWrapMode.Overflow;
             t.verticalOverflow = VerticalWrapMode.Overflow;
             var rt = t.rectTransform;
-            rt.anchorMin = anchorMin; rt.anchorMax = anchorMax;
-            rt.pivot = new Vector2(anchorMin.x, anchorMin.y);
-            rt.anchoredPosition = new Vector2(anchorMin.x == 0.5f ? 0 : 28, align == TextAnchor.UpperLeft ? -28 : 28);
-            rt.sizeDelta = new Vector2(1400, 60);
+            rt.anchorMin = anchor; rt.anchorMax = anchor;
+            rt.pivot = anchor;
+            rt.anchoredPosition = offset;
+            rt.sizeDelta = new Vector2(1400, 44);
             return t;
         }
 
@@ -48,12 +57,30 @@ namespace Virus.UI
             var s = GameState.I;
             if (s == null) return;
             var r = s.resources;
-            if (_res != null)
-                _res.text = $"Data {r["data_fragments"]}   Code {r["code_samples"]}   Mutagen {r["mutagen"]}";
-            if (_progress != null)
+            _res.text = $"Data {r["data_fragments"]}   Code {r["code_samples"]}   Mutagen {r["mutagen"]}";
+
+            if (raidMode && s.raid != null)
+            {
+                _progress.text = $"{s.raid.name} · {GameData.TIERS[s.raid.tier].shortName} · {s.raid.av}";
+                string evac = s.evacOpen ? $"   ЭВАКУАЦИЯ: {Mathf.Max((int)s.evacLeft, 0)}с" : "";
+                _bars.text = $"ДОБЫЧА {Mathf.Min((int)s.access, 999)}%   ТРЕВОГА {(int)s.alarm}% [{s.AlarmPhaseName()}]   HP {s.myHp}/{s.myMaxHp}{evac}";
+                _bars.color = s.AlarmPhase() >= 2 ? new Color(1f, 0.4f, 0.4f) : new Color(0.88f, 0.95f, 1f);
+            }
+            else
+            {
                 _progress.text = $"ЗАРАЖЕНИЕ ГРИДА: {s.InfectedTotal()} / {s.TotalNodes()} серверов";
+                _bars.text = "";
+            }
+
+            if (_toastT > 0f)
+            {
+                _toastT -= Time.deltaTime;
+                if (_toastT <= 0f) _toast.text = "";
+            }
         }
 
         public void SetPrompt(string text) { if (_prompt != null) _prompt.text = text; }
+        public void SetObjective(string text) { if (_objective != null) _objective.text = text; }
+        public void Toast(string text) { if (_toast != null) { _toast.text = text; _toastT = 3.2f; } }
     }
 }

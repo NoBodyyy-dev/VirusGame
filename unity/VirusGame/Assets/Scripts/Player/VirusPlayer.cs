@@ -187,5 +187,19 @@ namespace Virus.Player
             var d = _yaw.forward; d.y = 0f;
             return d.sqrMagnitude > 0.01f ? d.normalized : Vector3.forward;
         }
+
+        /// Мгновенный перенос (нокдаун/зип-лайн): CC надо выключить на кадр.
+        public void Teleport(Vector3 pos)
+        {
+            _cc.enabled = false;
+            transform.position = pos;
+            _vel = Vector3.zero;
+            _cc.enabled = true;
+        }
+
+        /// Импульс (ловушка ударила, рэгдолл-лайт).
+        public void Impulse(Vector3 v) => _vel += v;
+
+        public float PlanarSpeed => new Vector2(_vel.x, _vel.z).magnitude;
     }
 }

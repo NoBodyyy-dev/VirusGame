@@ -104,7 +104,7 @@ namespace Virus.Util
         public static Material Sidewalk()   => Base(new Color(0.26f,0.27f,0.30f), 0f, 0.45f, "side", 91, 0.5f, 0.4f);
         public static Material PlasterOld(Color? t = null) => Base(t ?? new Color(0.5f,0.48f,0.42f), 0f, 0.05f, "pls", 101, 0.08f, 0.35f);
         public static Material CarpetRot()  => Base(new Color(0.24f,0.26f,0.20f), 0f, 0f, "cpt", 121, 0.35f, 0.3f);
-        public static Material Moss()       => Base(new Color(0.20f,0.34f,0.14f), 0f, 0f, "mos", 131, 0.28f, 0.5f);
+        public static Material Moss(Color? t = null) => Base(t ?? new Color(0.20f,0.34f,0.14f), 0f, 0f, "mos", 131, 0.28f, 0.5f);
         public static Material BunkerWall(Color? t = null) => Base(t ?? new Color(0.30f,0.31f,0.30f), 0f, 0.03f, "bnk", 161, 0.04f, 0.25f);
         public static Material Rust(Color? t = null) => Base(t ?? new Color(0.38f,0.24f,0.16f), 0.6f, 0.2f, "rst", 171, 0.16f, 0.45f);
         public static Material DeckMetal(Color? t = null) => Base(t ?? new Color(0.36f,0.38f,0.42f), 0.8f, 0.5f, "dck", 181, 0.9f, 0.8f);

@@ -44,10 +44,22 @@ namespace Virus.Core
         public bool campaignWon = false;
 
         // ── состояние взлома (рейда) ──
-        public Dictionary<string, object> nodeConfig = new();
+        public class RaidConfig
+        {
+            public string name, theme, av;
+            public int tier, quota, files, crates, sensitivity, seed;
+            public float trapInterval, camRange, creep;
+        }
+
+        public RaidConfig raid;
         public float access, alarm, maxBandwidth = 100f, bandwidth = 100f, bwRegen = 4f;
         public int myHp = 3, myMaxHp = 3;
-        public bool myBug, evacOpen;
+        public bool myBug, evacOpen, wipeForced;
+        public float evacLeft;
+        public const float EVAC_TIME = 75f, WIPE_EVAC_TIME = 45f;
+
+        // итоги последнего рейда (для результатов и статистики)
+        public int lastDelivered, lastDeposits;
 
         // ── кампания ──
         public void NewCampaign()
@@ -175,20 +187,29 @@ namespace Virus.Core
             access = 0f;
             alarm = gridHeat * 0.3f;
             maxBandwidth = 100f; bandwidth = maxBandwidth; bwRegen = 4f;
-            myMaxHp = 3; myHp = myMaxHp; myBug = false; evacOpen = false;
-            nodeConfig = BuildNodeConfig(n);
+            myMaxHp = 3; myHp = myMaxHp; myBug = false;
+            evacOpen = false; wipeForced = false; evacLeft = 0f;
+            lastDelivered = 0; lastDeposits = 0;
+            var t = GameData.TIERS[n.tier];
+            raid = new RaidConfig {
+                name = n.name, tier = n.tier, theme = t.theme, av = n.av,
+                quota = t.quota, files = t.files, crates = t.crates,
+                sensitivity = t.sensitivity, trapInterval = t.trapInterval,
+                camRange = t.camRange, creep = t.creep, seed = n.seed,
+            };
         }
 
-        Dictionary<string, object> BuildNodeConfig(ServerNode n)
+        // ── тревога (не падает сама!) и фазы: SLEEP/SCAN/PURGE/WIPE ──
+        public int AlarmPhase() => alarm >= 90f ? 3 : alarm >= 55f ? 2 : alarm >= 25f ? 1 : 0;
+        public string AlarmPhaseName() => new[] { "SLEEP", "SCAN", "PURGE", "WIPE" }[AlarmPhase()];
+        public void ApplyAlarm(float amount) => alarm = Mathf.Clamp(alarm + amount, 0f, 100f);
+
+        // лут внесён в портал
+        public void DepositValue(float v)
         {
-            var t = GameData.TIERS[n.tier];
-            return new Dictionary<string, object> {
-                { "name", n.name }, { "tier", n.tier }, { "theme", t.theme },
-                { "antivirus", n.av }, { "quota", t.quota }, { "files", t.files },
-                { "crates", t.crates }, { "sensitivity", t.sensitivity },
-                { "trap_interval", t.trapInterval }, { "cam_range", t.camRange },
-                { "creep", t.creep }, { "difficulty", n.tier }, { "seed", n.seed },
-            };
+            access = Mathf.Min(access + v / Mathf.Max(raid?.quota ?? 100, 1) * 100f, 999f);
+            lastDelivered += (int)v;
+            lastDeposits++;
         }
 
         public void FinishHack(bool victory)
@@ -199,12 +220,15 @@ namespace Virus.Core
                 currentNode.infected = true;
                 currentNode.failed = false;
                 gridHeat = Mathf.Max(gridHeat - 10f, 0f);
-                resources["data_fragments"] += 12 + currentNode.tier * 6;
+                resources["data_fragments"] += Mathf.Max((int)(lastDelivered * (1.1f + 0.35f * currentNode.tier)), 8);
+                if (currentNode.tier >= 2) resources["mutagen"] += 1;
+                resources["code_samples"] += currentNode.tier >= 1 ? 1 : 0;
             }
             else
             {
                 currentNode.failed = true;
                 gridHeat = Mathf.Min(gridHeat + 25f, 100f);
+                resources["data_fragments"] += (int)(lastDelivered * 0.4f);
             }
             EvolutionChanged?.Invoke();
         }
