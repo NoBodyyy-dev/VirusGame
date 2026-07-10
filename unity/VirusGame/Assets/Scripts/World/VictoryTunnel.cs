@@ -63,9 +63,15 @@ namespace Virus.World
             for (float z = ZStart - 4; z > ZEnd + 2; z -= 8)
                 Build.MeshBox(transform, new Vector3(W - 3, 0.08f, 0.8f), Mats.Neon(Color.white, 2f), new Vector3(0, H - 0.05f, z));
 
+            // поперечные баннер-арки с надписями (не летающий текст, а конструкция)
             foreach (var (txt, z) in new[] { ("ГРИД ОСВОБОЖДЁН", ZStart - 6f), ("ВСЯ ИНФОРМАЦИЯ УКРАДЕНА", 8f), ("ЯДРО РАЗРУШЕНО", -22f) })
             {
-                var l = Build.Label(transform, txt, new Vector3(0, 4.6f, z), 5.4f, new Color(0.45f, 0.6f, 0.75f, 0.85f), false);
+                Build.MeshBox(transform, new Vector3(txt.Length * 0.68f + 1.6f, 1.9f, 0.24f),
+                    Mats.Plastic(new Color(0.9f, 0.93f, 0.97f)), new Vector3(0, 4.6f, z));
+                for (int s = -1; s <= 1; s += 2)
+                    Build.MeshBox(transform, new Vector3(0.2f, 4.6f, 0.2f), Mats.Metal(new Color(0.75f, 0.78f, 0.83f), 0.4f),
+                        new Vector3(s * (txt.Length * 0.34f + 0.9f), 2.3f, z));
+                var l = Build.Label(transform, txt, new Vector3(0, 4.6f, z - 0.16f), 5.4f, new Color(0.3f, 0.45f, 0.62f), false);
                 l.transform.rotation = Quaternion.Euler(0, 180, 0);
             }
 
@@ -91,7 +97,6 @@ namespace Virus.World
             var endPos = new Vector3(0, 0, ZEnd + 3);
             Build.Solid(transform, new Vector3(1.7f, 2.6f, 1.2f), Mats.MetalDark(0.45f), endPos + Vector3.up * 1.3f);
             Build.MeshBox(transform, Vector3.one * 0.5f, Mats.Neon(GameData.INFECTED, 2f), endPos + Vector3.up * 3f);
-            Build.Label(transform, "ВХОД НА СЕРВЕР\n[E] — конец игры", endPos + Vector3.up * 4.4f, 3.6f, GameData.INFECTED);
 
             var go = new GameObject("Player", typeof(CharacterController), typeof(Player.VirusPlayer));
             _player = go.GetComponent<Player.VirusPlayer>();

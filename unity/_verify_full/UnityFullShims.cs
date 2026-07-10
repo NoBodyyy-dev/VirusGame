@@ -233,7 +233,7 @@ namespace UnityEngine
         public LightShadows shadows;
     }
 
-    public class Texture : Object { }
+    public class Texture : Object { public int anisoLevel; }
     public class Texture2D : Texture
     {
         public TextureWrapMode wrapMode;

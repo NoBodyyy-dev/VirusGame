@@ -177,6 +177,9 @@ namespace Virus.EditorTools
         public static void BuildWindows()
         {
             PlayerSettings.runInBackground = true;   // кооп двумя окнами + автопроверки
+            // Unity 6: сплеш «Made with Unity» отключаем (разрешено и на Personal)
+            PlayerSettings.SplashScreen.show = false;
+            PlayerSettings.SplashScreen.showUnityLogo = false;
             EnsureSteamDefine();
             SetupURP();
             // Форсим только Standard (обычный шейдер, иначе вырезается).

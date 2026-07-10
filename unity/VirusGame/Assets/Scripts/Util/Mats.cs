@@ -56,8 +56,8 @@ namespace Virus.Util
         static Texture2D Noise(string key, int seed, float freq)
         {
             if (_texCache.TryGetValue(key, out var t)) return t;
-            const int N = 128;
-            var tex = new Texture2D(N, N, TextureFormat.RGB24, true) { wrapMode = TextureWrapMode.Repeat };
+            const int N = 256;   // 128 мылило вблизи
+            var tex = new Texture2D(N, N, TextureFormat.RGB24, true) { wrapMode = TextureWrapMode.Repeat, anisoLevel = 4 };
             var rng = new System.Random(seed);
             // простой октавный value-noise; для продакшена заменить на FastNoiseLite-порт
             var px = new Color[N * N];
@@ -65,15 +65,16 @@ namespace Virus.Util
                 for (int x = 0; x < N; x++)
                 {
                     float v = 0f, amp = 0.5f, f = freq;
-                    for (int o = 0; o < 4; o++)
+                    for (int o = 0; o < 5; o++)
                     {
-                        v += amp * Mathf.PerlinNoise((x * f + seed) , (y * f + seed));
+                        v += amp * Mathf.PerlinNoise((x * f + seed), (y * f + seed));
                         amp *= 0.5f; f *= 2f;
                     }
-                    // текстура МНОЖИТ цвет материала: держим её светлой (0.68..1.0),
-                    // иначе всё выходит вдвое темнее задуманного тинта
-                    float c = Mathf.Clamp01(0.68f + v * 0.36f);
-                    px[y * N + x] = new Color(c, c, c);
+                    // текстура МНОЖИТ цвет материала: держим среднее светлым, но
+                    // с более широким размахом — фактура читается, а не мылится
+                    float c = Mathf.Clamp01(0.58f + v * 0.5f);
+                    // лёгкий цветовой перекос: убирает «пластилиновую» серость
+                    px[y * N + x] = new Color(c, c * 0.985f, c * 0.965f);
                 }
             tex.SetPixels(px);
             tex.Apply();

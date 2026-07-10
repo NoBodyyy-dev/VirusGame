@@ -32,8 +32,20 @@ namespace Virus.World
                 foreach (var dd in t.doors)
                     MakeDoor(new GridData.DoorDef(dd.key, "", "", 0, w - WallT * 2f, dd.diff, t.key == "t3o", dd.opz),
                         new Vector3(cx, 0, dd.z), "x", Mats.Rust());
-                Build.Label(transform, $"ТУННЕЛЬ С ГОЛОВОЛОМКАМИ\n{t.to}", new Vector3(cx, 3.6f, t.zs - 2.6f), 2.8f, new Color(0.55f, 0.75f, 0.95f));
+                var tt = t;
+                MakeHint(new Vector3(cx, 1f, tt.zs - 4f), 7f, () => $"Туннель с головоломками → {tt.to}");
             }
+        }
+
+        // прогресс зоны — заполняющаяся линия на раме прохода (по ТЗ)
+        void GateProgressBar(Vector3 center, float width, float frac, Color col)
+        {
+            Build.MeshBox(transform, new Vector3(width, 0.34f, 0.22f), Mats.MetalDark(0.55f), center);
+            Build.MeshBox(transform, new Vector3(width - 0.12f, 0.22f, 0.1f), Mats.Plastic(new Color(0.05f, 0.06f, 0.08f)), center + new Vector3(0, 0, -0.08f));
+            if (frac <= 0.01f) return;
+            float fw = (width - 0.2f) * Mathf.Clamp01(frac);
+            Build.MeshBox(transform, new Vector3(fw, 0.16f, 0.08f), Mats.Neon(col, 2.2f),
+                center + new Vector3(-(width - 0.2f) * 0.5f + fw * 0.5f, 0, -0.13f));
         }
 
         void BuildStageGate(GridData.Tunnel t)
@@ -45,20 +57,24 @@ namespace Virus.World
             if (done) pane.transform.localScale = new Vector3(gw, 0.3f, 0.3f);  // открытый барьер — тонкая планка сверху
             Build.Omni(transform, new Vector3(cx, 3f, gz + 2f), col, 1.8f, 10f);
             if (!done) Build.Collide(transform, new Vector3(gw, DoorH, 0.4f), new Vector3(cx, DoorH * 0.5f, gz));
-            string status = done ? "ПРОХОД ОТКРЫТ" :
-                t.key == "t3o" ? $"ЗАБЛОКИРОВАНО: активируйте 28 серверов ({S.FacilityInfected()}/28)"
-                               : $"ЗАБЛОКИРОВАНО: серверы этапа {S.ZoneInfected(t.gateZone)}/{S.ZoneTotal(t.gateZone)}";
-            Build.Label(transform, status, new Vector3(cx, DoorH + 1.3f, gz + 0.6f), 3f, done ? GameData.INFECTED : col);
+            float frac = t.key == "t3o"
+                ? S.FacilityInfected() / 28f
+                : S.ZoneTotal(t.gateZone) > 0 ? (float)S.ZoneInfected(t.gateZone) / S.ZoneTotal(t.gateZone) : 0f;
+            GateProgressBar(new Vector3(cx, DoorH + 0.55f, gz + 0.4f), Mathf.Min(gw, 6f), done ? 1f : frac, done ? GameData.INFECTED : col);
+            var tc = t;
+            MakeHint(new Vector3(cx, 1f, gz + 5f), 8f, () =>
+                S.ZoneComplete(tc.gateZone) ? "Проход открыт" :
+                tc.key == "t3o" ? $"Заблокировано: активируйте 28 серверов ({S.FacilityInfected()}/28)"
+                                : $"Заблокировано: серверы этапа {S.ZoneInfected(tc.gateZone)}/{S.ZoneTotal(tc.gateZone)}");
         }
 
         // ── этап 0: обучающий ангар ──
         void BuildStage0()
         {
-            Build.Label(transform, "ТРЕНИРОВОЧНЫЙ ГРИД", new Vector3(0, 4.6f, 38.4f), 6f, new Color(0.7f, 0.9f, 1f), false);
-            Build.Label(transform, "захвати 3 сервера — открой дверь на 1 уровень", new Vector3(0, 3.2f, 38.4f), 2.6f, GameData.INFECTED, false);
-            Build.Label(transform, "WASD — движение · мышь — камера · ПРОБЕЛ — прыжок · Shift — бег", new Vector3(0, 2.3f, 38.4f), 2f, new Color(0.5f, 0.68f, 0.78f), false);
-
-            Build.Label(transform, "УРОК 1 · подойди к серверу и жми [E]", new Vector3(0, 3.4f, 22f), 2.4f, GameData.INFECTED);
+            // уроки — подсказками при подходе (летающие тексты убраны)
+            MakeHint(new Vector3(0, 1f, 32f), 10f,
+                () => "ТРЕНИРОВОЧНЫЙ ГРИД · WASD — движение, ПРОБЕЛ — прыжок, Shift — бег");
+            MakeHint(new Vector3(0, 1f, 22f), 8f, () => "УРОК 1: подойди к серверу и жми [E]");
 
             // урок 2: отсек с дверью-головоломкой
             var part = Mats.Metal(new Color(0.4f, 0.42f, 0.46f), 0.5f);
@@ -66,13 +82,13 @@ namespace Virus.World
             Build.Solid(transform, new Vector3(WallT, DoorH, 5.3f), part, new Vector3(-8, DoorH * 0.5f, 5.35f));
             Build.Solid(transform, new Vector3(WallT, DoorH, 5.3f), part, new Vector3(-8, DoorH * 0.5f, -3.35f));
             MakeDoor(new GridData.DoorDef("d_tut", "", "", 0, 3.4f, 1, false, ""), new Vector3(-8, 0, 1), "z", part);
-            Build.Label(transform, "УРОК 2 · дверь заперта — реши головоломку [E]", new Vector3(-8, 3.6f, 4), 2.4f, new Color(1f, 0.7f, 0.35f));
+            MakeHint(new Vector3(-8, 1f, 4), 6f, () => "УРОК 2: дверь заперта — реши головоломку [E]");
             Build.Omni(transform, new Vector3(-16, 6, 0), new Color(0.85f, 0.92f, 1f), 2.2f, 16f);
 
             // урок 3: платформа + блок
             Build.Solid(transform, new Vector3(5, 2.6f, 5), Mats.DeckMetal(), new Vector3(14, 1.3f, 8));
             Build.MeshBox(transform, new Vector3(5.2f, 0.08f, 5.2f), Mats.Neon(GameData.TIER_COLORS[0], 0.8f), new Vector3(14, 2.65f, 8));
-            Build.Label(transform, "УРОК 3 · поднеси блок [E], поставь и запрыгни", new Vector3(14, 4.4f, 8), 2.4f, new Color(0.8f, 0.9f, 1f));
+            MakeHint(new Vector3(14, 1f, 8), 7f, () => "УРОК 3: поднеси блок [E], поставь и запрыгни");
 
             BuildBlocks();
             BuildTutorialExitGate();
@@ -86,8 +102,10 @@ namespace Virus.World
             if (done) pane.transform.localScale = new Vector3(gw, 0.3f, 0.3f);
             if (!done) Build.Collide(transform, new Vector3(gw, DoorH, 0.4f), new Vector3(0, DoorH * 0.5f, gz));
             Build.Omni(transform, new Vector3(0, 3, gz + 1.5f), new Color(0.25f, 0.6f, 1f), 1.8f, 10f);
-            Build.Label(transform, done ? "ПРОХОД ОТКРЫТ · 1 УРОВЕНЬ" : $"ЗАБЛОКИРОВАНО: серверы {S.ZoneInfected(0)}/3",
-                new Vector3(0, DoorH + 1.2f, gz + 0.6f), 3f, done ? GameData.INFECTED : new Color(0.5f, 0.8f, 1f));
+            GateProgressBar(new Vector3(0, DoorH + 0.55f, gz + 0.4f), gw, done ? 1f : S.ZoneInfected(0) / 3f,
+                done ? GameData.INFECTED : new Color(0.5f, 0.8f, 1f));
+            MakeHint(new Vector3(0, 1f, gz + 4f), 6f, () => S.ZoneComplete(0)
+                ? "Проход на 1 уровень открыт" : $"Дверь заперта: захвачено серверов {S.ZoneInfected(0)}/3");
         }
 
         // ── этап 1: ночной мегаполис ──
@@ -105,7 +123,7 @@ namespace Virus.World
             for (int i = 0; i < spots.Length; i++)
             {
                 float w = R(8, 14), h = R(24, 46);
-                var win = Mats.Neon(new Color(0.85f, 0.75f, 0.5f), 0.35f);
+                var win = Mats.Neon(new Color(0.95f, 0.82f, 0.55f), 0.9f);
                 Build.MeshBox(transform, new Vector3(w, h, w), Mats.Plastic(new Color(0.06f, 0.07f, 0.1f)), spots[i] + Vector3.up * (h * 0.5f));
                 // «окна» — светящиеся горизонтальные пояса
                 for (float y = 3f; y < h - 2f; y += 4f)
@@ -132,16 +150,25 @@ namespace Virus.World
                 for (int cz = -1; cz <= 1; cz += 2)
                     Build.Solid(transform, new Vector3(0.5f, 4, 0.5f), Mats.Metal(new Color(0.4f, 0.42f, 0.46f), 0.45f), new Vector3(40 + cx * 2.4f, 2, -46 + cz * 2.4f));
             Build.MeshBox(transform, new Vector3(6.2f, 0.08f, 6.2f), Mats.Neon(GameData.TIER_COLORS[0], 0.9f), new Vector3(40, 4.54f, -46));
-            Build.Label(transform, "СЕРВЕР НА ВЫСОТЕ\nперенеси блоки [E] и выстрой лестницу", new Vector3(40, 7.2f, -46), 3f, GameData.TIER_COLORS[0]);
+            MakeHint(new Vector3(40, 1f, -40), 9f, () => "СЕРВЕР НА ВЫСОТЕ: перенеси блоки [E] и выстрой лестницу");
+            MakeHint(new Vector3(0, 1f, -12), 7f, () => "1 УРОВЕНЬ · НОЧНОЙ МЕГАПОЛИС");
 
-            Build.Label(transform, "СЕКРЕТНАЯ КОМНАТА", new Vector3(-15, 3.2f, -26), 2.6f, new Color(0.9f, 0.75f, 0.3f));
-            Build.Label(transform, "СЕКРЕТНАЯ КОМНАТА", new Vector3(36, 3.2f, -20), 2.6f, new Color(0.9f, 0.75f, 0.3f));
+            // секретные комнаты больше не анонсируют себя — только тост внутри
+            MakeHint(new Vector3(-15, 1f, -26), 4f, () => "Секретная комната!");
+            MakeHint(new Vector3(36, 1f, -20), 4f, () => "Секретная комната!");
         }
 
+        // городская вывеска: неоновый текст на тёмной панели с рамкой (диегетика)
         void NeonSign(string text, Vector3 pos, Color color, float yawDeg)
         {
             var facing = Quaternion.Euler(0, yawDeg, 0) * Vector3.forward;
-            var l = Build.Label(transform, text, pos + facing * 0.2f, 5f, color, false);
+            float w = text.Length * 0.62f + 1.2f;
+            // рамка СЗАДИ панели: спереди виден только светящийся кант по краям
+            var frame = Build.MeshBox(transform, new Vector3(w + 0.14f, 1.84f, 0.1f), Mats.Neon(color, 0.9f), pos - facing * 0.06f);
+            frame.transform.rotation = Quaternion.Euler(0, yawDeg, 0);
+            var panel = Build.MeshBox(transform, new Vector3(w, 1.7f, 0.18f), Mats.Plastic(new Color(0.05f, 0.05f, 0.07f)), pos);
+            panel.transform.rotation = Quaternion.Euler(0, yawDeg, 0);
+            var l = Build.Label(transform, text, pos + facing * 0.14f, 5f, color, false);
             l.transform.rotation = Quaternion.Euler(0, yawDeg + 180f, 0);   // TextMesh смотрит по -Z
             Build.Omni(transform, pos + facing * 1.2f, color, 1.3f, 7f);
         }
@@ -194,7 +221,7 @@ namespace Virus.World
             Build.Solid(transform, new Vector3(0.15f, 1f, 12f), Mats.Metal(new Color(0.5f, 0.45f, 0.35f), 0.55f), new Vector3(78, 6.5f, -114));
             Build.Solid(transform, new Vector3(0.15f, 1f, 16f), Mats.Metal(new Color(0.5f, 0.45f, 0.35f), 0.55f), new Vector3(78, 6.5f, -134));
             Build.Solid(transform, new Vector3(48f, 1f, 0.15f), Mats.Metal(new Color(0.5f, 0.45f, 0.35f), 0.55f), new Vector3(102, 6.5f, -144));
-            Build.Label(transform, "ЯРУС · подъём лифтом", new Vector3(80, 8.2f, -124), 2.8f, GameData.TIER_COLORS[1]);
+            MakeHint(new Vector3(48, 1f, -100), 9f, () => "2 УРОВЕНЬ · ЗАТХЛЫЕ ОФИСЫ: наверху ярус — активируй лифт");
 
             // питание лифта: 2 рычага + провод + роутер
             MakeLever("s2a", new Vector3(28, 0, -112), "РЫЧАГ ПИТАНИЯ А (лифт яруса)");
@@ -202,10 +229,10 @@ namespace Virus.World
             MakeWire("s2", new Vector3[] { new(100, 0, -112), new(92, 0, -116), new(86, 0, -120), new(80, 0, -122) },
                 new Color(0.95f, 0.6f, 0.2f), "КАБЕЛЬ К ЛИФТУ");
             MakeRouter("s2", new Vector3(124.4f, 0, -140));
-            MakeLift(80, -124, 6.05f, "s2", "ЛИФТ ЯРУСА");
+            MakeLift(80, -124, 6.05f, "s2");
 
-            Build.Label(transform, "СЕКРЕТНАЯ КОМНАТА", new Vector3(18, 3.2f, -94), 2.6f, new Color(0.9f, 0.75f, 0.3f));
-            Build.Label(transform, "СЕКРЕТНАЯ КОМНАТА", new Vector3(132, 3.2f, -129), 2.6f, new Color(0.9f, 0.75f, 0.3f));
+            MakeHint(new Vector3(18, 1f, -94), 4f, () => "Секретная комната!");
+            MakeHint(new Vector3(132, 1f, -129), 4f, () => "Секретная комната!");
         }
 
         // ── этап 3: бункер ──
@@ -232,7 +259,8 @@ namespace Virus.World
 
             // щит питания + рубильник + 3 генератора с кабелями
             Build.MeshBox(transform, new Vector3(3.2f, 2.2f, 0.4f), Mats.Metal(new Color(0.5f, 0.45f, 0.3f), 0.5f), new Vector3(98, 1.6f, -177.8f));
-            Build.Label(transform, "ЩИТ ПИТАНИЯ ЭТАПА 3\nпровода → генераторы → рубильник", new Vector3(98, 3.4f, -179), 2.6f, new Color(0.95f, 0.8f, 0.35f));
+            MakeHint(new Vector3(98, 1f, -182), 9f,
+                () => "3 УРОВЕНЬ · БУНКЕР: щит питания — протяни провода, запусти генераторы, дёрни рубильник");
             MakeLever("s3master", new Vector3(102, 0, -179.5f), "ГЛАВНЫЙ РУБИЛЬНИК");
             MakeGenerator("g1", new Vector3(84, 0, -192));
             MakeGenerator("g2", new Vector3(104, 0, -200));
@@ -246,7 +274,7 @@ namespace Virus.World
             foreach (var cp in new Vector3[] { new(114, 0, -258), new(128, 0, -258), new(142, 0, -258) })
                 Build.Solid(transform, new Vector3(0.6f, 5.5f, 0.6f), Mats.Rust(), cp + new Vector3(0, 2.75f, 0));
             Build.Solid(transform, new Vector3(30, 1f, 0.15f), Mats.Metal(new Color(0.5f, 0.45f, 0.35f), 0.55f), new Vector3(129, 6.5f, -256));
-            MakeLift(110, -260, 6.05f, "s3", "ЛИФТ УСТУПА");
+            MakeLift(110, -260, 6.05f, "s3");
 
             BuildBeams();
 
@@ -255,8 +283,9 @@ namespace Virus.World
             Build.Solid(transform, new Vector3(6, 6.5f, 6), Mats.BunkerWall(new Color(0.26f, 0.27f, 0.26f)), new Vector3(134, 3.25f, -252));
             Build.MeshBox(transform, new Vector3(6.2f, 0.3f, 6.2f), Mats.Hazard(), new Vector3(134, 6.55f, -252));
             Build.MeshBox(transform, new Vector3(0.6f, 0.5f, 0.6f), Mats.Neon(off ? GameData.INFECTED : new Color(1f, 0.2f, 0.15f), 2.2f), new Vector3(134, 7.2f, -252));
-            Build.Label(transform, off ? "ЛОВУШКИ ОТКЛЮЧЕНЫ" : "БЛОК-ОТКЛЮЧАТЕЛЬ ЛОВУШЕК\n[E держать] на вершине",
-                new Vector3(134, 9f, -252), 3f, off ? GameData.INFECTED : new Color(1f, 0.55f, 0.2f));
+            MakeHint(new Vector3(134, 1f, -246), 8f, () => S.Flag("traps_off")
+                ? "Ловушки этапа отключены"
+                : "БЛОК-ОТКЛЮЧАТЕЛЬ ЛОВУШЕК: заберись на вершину (паркур + кнопка + провод)");
             var ov = MakeInteract(transform, new Vector3(134, 7f, -252), 3f);
             ov.holdSeconds = 1.5f;
             ov.prompt = "отключение ловушек…";
@@ -269,8 +298,6 @@ namespace Virus.World
             Build.Solid(transform, new Vector3(2.2f, 0.4f, 2.2f), Mats.DeckMetal(), new Vector3(144.3f, 3.2f, -244.5f));
             bool pressed = S.Flag("zip:e3");
             Build.MeshBox(transform, new Vector3(0.3f, 0.3f, 0.12f), Mats.Neon(pressed ? GameData.INFECTED : new Color(1f, 0.6f, 0.15f), 2f), new Vector3(144.3f, 4.1f, -245.3f));
-            Build.Label(transform, pressed ? "ПРОВОД АКТИВЕН" : "КНОПКА ПЕРЕХОДА\n[E] активировать провод", new Vector3(144.3f, 5.3f, -244.5f), 2.4f,
-                pressed ? GameData.INFECTED : new Color(1f, 0.7f, 0.35f));
             var btn = MakeInteract(transform, new Vector3(144.3f, 4.1f, -244.5f), 2.6f);
             btn.prompt = "[E] КНОПКА ПЕРЕХОДА: подать питание на провод";
             btn.enabledFn = () => !S.Flag("zip:e3");
@@ -290,8 +317,8 @@ namespace Virus.World
                     Build.MeshBox(transform, new Vector3(0.5f, 0.3f, 0.5f), Mats.Neon(new Color(1f, 0.1f, 0.08f), 2.5f), bp);
                     _alertLights.Add(Build.Omni(transform, bp + Vector3.down * 0.6f, new Color(1f, 0.12f, 0.1f), 1.8f, 16f));
                 }
-                Build.Label(transform, "!! 28/28 СЕРВЕРОВ !!\nПРОТОКОЛ ВТОРЖЕНИЯ · ПУТЬ К ОРАКУЛУ ОТКРЫТ",
-                    new Vector3(122, 6.5f, -268), 3.2f, new Color(1f, 0.25f, 0.2f));
+                MakeHint(new Vector3(122, 1f, -268), 12f,
+                    () => "28/28 СЕРВЕРОВ! Протокол вторжения — путь к ОРАКУЛУ открыт");
             }
         }
 

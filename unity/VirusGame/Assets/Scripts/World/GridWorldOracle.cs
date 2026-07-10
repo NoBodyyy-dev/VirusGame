@@ -60,7 +60,12 @@ namespace Virus.World
                 col.size = new Vector3(20, 14, 20);
             }
 
-            _board = Build.Label(transform, "", pos + Vector3.up * 13.5f, 4.6f, new Color(0.85f, 0.92f, 1f));
+            // табло штурма — смонтированный экран на южной грани башни ядра
+            Build.MeshBox(transform, new Vector3(9.6f, 4.4f, 0.35f), Mats.Plastic(new Color(0.06f, 0.07f, 0.1f)),
+                pos + new Vector3(0, 13.5f, 5.75f));
+            Build.MeshBox(transform, new Vector3(9.8f, 4.6f, 0.2f), Mats.Neon(GameData.ORACLE, 0.5f),
+                pos + new Vector3(0, 13.5f, 5.7f));
+            _board = Build.Label(transform, "", pos + new Vector3(0, 13.5f, 6.05f), 4.2f, new Color(0.85f, 0.92f, 1f), false);
         }
 
         void RefreshOracleShield()
@@ -78,10 +83,8 @@ namespace Virus.World
             root.SetParent(transform, false);
             root.localPosition = pd.pos;
             Build.Solid(root, new Vector3(0.9f, 1.2f, 0.6f), Mats.Obsidian(), new Vector3(0, 0.6f, 0));
-            Build.MeshBox(root, new Vector3(1.1f, 0.7f, 0.1f), Mats.Neon(solved ? GameData.INFECTED : GameData.ORACLE, 1.3f), new Vector3(0, 1.5f, 0.2f));
+            var screen = Build.MeshBox(root, new Vector3(1.1f, 0.7f, 0.1f), Mats.Neon(solved ? GameData.INFECTED : GameData.ORACLE, 1.3f), new Vector3(0, 1.5f, 0.2f));
             var num = pd.key.Substring(4);
-            var lbl = Build.Label(root, $"ГОЛОВОЛОМКА {num}\n{(solved ? "РЕШЕНА" : "[E] взломать")}", new Vector3(0, 2.5f, 0), 2.4f,
-                solved ? GameData.INFECTED : new Color(1f, 0.5f, 0.55f));
             if (!solved)
             {
                 var it = MakeInteract(root, new Vector3(0, 1, 0), 2.8f);
@@ -90,8 +93,7 @@ namespace Virus.World
                 it.onInteract = () => UI.PuzzleUI.Open(pd.diff, "ГОЛОВОЛОМКА ОРАКУЛА", () =>
                 {
                     S.SetFlag(pd.key);
-                    lbl.text = $"ГОЛОВОЛОМКА {num}\nРЕШЕНА";
-                    lbl.color = GameData.INFECTED;
+                    screen.GetComponent<MeshRenderer>().sharedMaterial = Mats.Neon(GameData.INFECTED, 1.3f);
                     _hud?.Toast($"ГОЛОВОЛОМКИ ОРАКУЛА: {S.OraclePuzzlesDone()}/{GameData.ORACLE_PUZZLES_TOTAL}");
                     RefreshOracleShield();
                 });
@@ -109,11 +111,11 @@ namespace Virus.World
                 Build.MeshBox(transform, new Vector3(1.4f, 0.1f, 0.3f), mat,
                     pos + new Vector3(Mathf.Cos(a) * 4.8f, 0.1f, Mathf.Sin(a) * 4.8f));
             }
-            Build.MeshBox(transform, new Vector3(0.4f, 2.4f, 0.4f), mat, pos + Vector3.up * 1.2f);
-            var st = new TerrState { pos = pos, prog = done ? 1f : 0f, mat = mat };
-            st.label = Build.Label(transform, done ? "ТЕРРИТОРИЯ ЗАХВАЧЕНА" : "ТЕРРИТОРИЯ ОРАКУЛА\nвстань в кольцо для захвата",
-                pos + Vector3.up * 3.2f, 2.8f, done ? GameData.INFECTED : new Color(1f, 0.6f, 0.6f));
+            var pillar = Build.MeshBox(transform, new Vector3(0.4f, 2.4f, 0.4f), mat, pos + Vector3.up * 1.2f);
+            var st = new TerrState { pos = pos, prog = done ? 1f : 0f, mat = mat, pillar = pillar.transform };
             _terrs[key] = st;
+            MakeHint(pos + Vector3.up, 7f, () => S.Flag(key)
+                ? "Территория захвачена" : "ТЕРРИТОРИЯ ОРАКУЛА: встань в кольцо для захвата");
         }
 
         void TickTerrs()
@@ -128,13 +130,15 @@ namespace Virus.World
                 if (inside)
                 {
                     st.prog = Mathf.Min(st.prog + Time.deltaTime / 12f, 1f);
-                    st.label.text = $"ЗАХВАТ ТЕРРИТОРИИ: {(int)(st.prog * 100)}%\n(стой в кольце)";
+                    // прогресс захвата — столб растёт и разгорается (без текста)
+                    st.pillar.localScale = new Vector3(0.4f + st.prog * 0.3f, 2.4f + st.prog * 2.2f, 0.4f + st.prog * 0.3f);
+                    st.pillar.position = st.pos + Vector3.up * (1.2f + st.prog * 1.1f);
+                    st.mat.SetColor("_EmissionColor",
+                        Color.Lerp(GameData.ORACLE, GameData.INFECTED, st.prog) * (1.2f + st.prog * 1.4f));
                     if (st.prog >= 1f)
                     {
                         S.SetFlag(kv.Key);
                         st.mat.SetColor("_EmissionColor", (Color)GameData.INFECTED * 1.4f);
-                        st.label.text = "ТЕРРИТОРИЯ ЗАХВАЧЕНА";
-                        st.label.color = GameData.INFECTED;
                         _hud?.Toast($"ТЕРРИТОРИИ ОРАКУЛА: {S.OracleTerritoriesDone()}/{GameData.ORACLE_TERRITORIES}");
                         RefreshOracleShield();
                     }
@@ -151,23 +155,19 @@ namespace Virus.World
             Build.Solid(root, new Vector3(1.8f, 2.6f, 1f), Mats.MetalDark(0.4f), new Vector3(0, 1.3f, 0));
             var scr = Mats.Neon(done ? GameData.INFECTED : new Color(0.2f, 0.85f, 0.4f), 1.2f);
             Build.MeshBox(root, new Vector3(0.8f, 0.5f, 0.08f), scr, new Vector3(0.3f, 2.2f, 0.54f));
-            var lbl = Build.Label(root, "", new Vector3(0, 3.4f, 0), 2.6f, done ? GameData.INFECTED : new Color(0.4f, 0.95f, 0.55f));
-            lbl.text = done ? "СТОЙКА ДАННЫХ\nИНФОРМАЦИЯ УКРАДЕНА" : "СТОЙКА ДАННЫХ";
             if (!done)
             {
                 var it = MakeInteract(root, new Vector3(0, 1.3f, 0), 2.8f);
                 it.holdSeconds = 3f;
                 it.dynamicPrompt = () => S.OracleCoreOpen()
-                    ? "кража данных…"
-                    : "стойка экранирована: головоломки + магистраль + рубильник + территории";
+                    ? "[E держать] СТОЙКА ДАННЫХ: кража данных…"
+                    : "СТОЙКА ЭКРАНИРОВАНА: головоломки + магистраль + рубильник + территории";
                 it.enabledFn = () => !S.Flag(key);
                 it.onInteract = () =>
                 {
                     if (!S.OracleCoreOpen()) return;
                     S.SetFlag(key);
                     scr.SetColor("_EmissionColor", (Color)GameData.INFECTED * 1.2f);
-                    lbl.text = "СТОЙКА ДАННЫХ\nИНФОРМАЦИЯ УКРАДЕНА";
-                    lbl.color = GameData.INFECTED;
                     S.resources["data_fragments"] += 40;
                     _hud?.Toast($"ДАННЫЕ УКРАДЕНЫ: {S.OracleRacksDone()}/{GameData.ORACLE_RACKS} (+40 Data)");
                     if (S.OracleDataStolen()) _hud?.Toast("ВСЯ ИНФОРМАЦИЯ У НАС — РУШЬТЕ ЯДРО ОРАКУЛА!");
@@ -214,9 +214,10 @@ namespace Virus.World
             _escapeGo.transform.localPosition = pos;
             Build.MeshBox(_escapeGo.transform, new Vector3(3.4f, 0.3f, 3.4f), Mats.Neon(GameData.INFECTED, 2.4f), new Vector3(0, 0.15f, 0));
             Build.Omni(_escapeGo.transform, new Vector3(0, 2, 0), GameData.INFECTED, 2.5f, 12f);
-            Build.Label(_escapeGo.transform, "ЭВАКУАЦИЯ ИЗ ГРИДА\n[E] сбежать", new Vector3(0, 4.2f, 0), 3.4f, GameData.INFECTED);
+            // маяк-колонна вместо текста: видно издалека
+            Build.MeshBox(_escapeGo.transform, new Vector3(0.5f, 9f, 0.5f), Mats.Neon(GameData.INFECTED, 1.2f), new Vector3(0, 4.8f, 0));
             var it = MakeInteract(_escapeGo.transform, new Vector3(0, 1, 0), 3.4f);
-            it.prompt = "[E] СБЕЖАТЬ ИЗ ГРИДА";
+            it.prompt = "[E] ЭВАКУАЦИЯ: СБЕЖАТЬ ИЗ ГРИДА";
             it.onInteract = () =>
             {
                 S.campaignWon = true;

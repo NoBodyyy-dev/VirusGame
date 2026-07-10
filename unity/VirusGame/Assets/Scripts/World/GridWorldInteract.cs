@@ -40,9 +40,7 @@ namespace Virus.World
                 st.body = Build.Collide(transform, size, new Vector3(pos.x, DoorH * 0.5f, pos.z));
             else
                 mesh.transform.localPosition += new Vector3(0, -DoorH + 0.4f, 0);
-            st.label = Build.Label(transform, "", new Vector3(pos.x, DoorH + 0.9f, pos.z), 2.6f, new Color(1f, 0.6f, 0.25f));
             _doors[def.key] = st;
-            RefreshDoorLabel(def.key);
 
             if (!solved)
             {
@@ -62,15 +60,6 @@ namespace Virus.World
             }
         }
 
-        void RefreshDoorLabel(string key)
-        {
-            var d = _doors[key];
-            if (d.label == null) return;
-            if (S.Flag("door:" + key)) { d.label.text = "ДВЕРЬ ОТКРЫТА"; d.label.color = GameData.INFECTED; }
-            else if (d.def.power && !S.Stage3Powered()) { d.label.text = "ОБЕСТОЧЕНА"; d.label.color = new Color(0.85f, 0.35f, 0.3f); }
-            else { d.label.text = "ЗАПЕРТО · [E] головоломка"; d.label.color = new Color(1f, 0.6f, 0.25f); }
-        }
-
         void OpenDoor(string key)
         {
             var d = _doors[key];
@@ -83,8 +72,7 @@ namespace Virus.World
                 _hud?.Toast($"ГОЛОВОЛОМКИ ОРАКУЛА: {S.OraclePuzzlesDone()}/{GameData.ORACLE_PUZZLES_TOTAL}");
                 RefreshOracleShield();
             }
-            RefreshDoorLabel(key);
-            RefreshPowerLabels();
+            RefreshPower();
         }
 
         // ── рычаг ──
@@ -97,8 +85,6 @@ namespace Virus.World
             Build.Solid(root, new Vector3(0.7f, 1.1f, 0.5f), Mats.MetalDark(0.4f), new Vector3(0, 0.55f, 0));
             var arm = Build.MeshBox(root, new Vector3(0.1f, 0.8f, 0.1f), Mats.Neon(on ? GameData.INFECTED : new Color(1f, 0.4f, 0.3f), 2f), new Vector3(0, 1.25f, 0));
             arm.transform.localRotation = Quaternion.Euler(0, 0, on ? 40 : -40);
-            var lbl = Build.Label(root, $"{desc}\n{(on ? "ВКЛЮЧЁН" : "[E] включить")}", new Vector3(0, 2.2f, 0), 2.4f,
-                on ? GameData.INFECTED : new Color(1f, 0.7f, 0.35f));
             if (!on)
             {
                 var it = MakeInteract(root, new Vector3(0, 1, 0), 2.6f);
@@ -109,10 +95,8 @@ namespace Virus.World
                     S.SetFlag("lever:" + key);
                     arm.transform.localRotation = Quaternion.Euler(0, 0, 40);
                     arm.GetComponent<MeshRenderer>().sharedMaterial = Mats.Neon(GameData.INFECTED, 2f);
-                    lbl.text = $"{desc}\nВКЛЮЧЁН";
-                    lbl.color = GameData.INFECTED;
                     _hud?.Toast($"{desc}: включён");
-                    RefreshPowerLabels();
+                    RefreshPower();
                 };
             }
         }
@@ -137,10 +121,8 @@ namespace Virus.World
                 it.enabledFn = () => !S.Flag("wire:" + key) && WireDoneN(key, pylons.Length) == idx;
                 it.onInteract = () => AdvanceWire(ws, idx);
             }
-            ws.label = Build.Label(transform, "", pylons[0] + new Vector3(0, 2.8f, 0), 2.4f, color);
             _wires[key] = ws;
             for (int i = 1; i < doneN; i++) DrawWireSeg(ws, i - 1, i);
-            RefreshWireLabel(ws);
         }
 
         int WireDoneN(string key, int total)
@@ -159,9 +141,9 @@ namespace Virus.World
             {
                 S.SetFlag("wire:" + ws.key);
                 _hud?.Toast($"{ws.desc}: линия под напряжением!");
-                RefreshPowerLabels();
+                RefreshPower();
             }
-            RefreshWireLabel(ws);
+            else _hud?.Toast($"{ws.desc}: опоры {WireDoneN(ws.key, ws.pylons.Length)}/{ws.pylons.Length}");
         }
 
         void DrawWireSeg(WireState ws, int i0, int i1)
@@ -179,14 +161,6 @@ namespace Virus.World
             }
         }
 
-        void RefreshWireLabel(WireState ws)
-        {
-            if (ws.label == null) return;
-            int n = WireDoneN(ws.key, ws.pylons.Length);
-            if (n >= ws.pylons.Length) { ws.label.text = $"{ws.desc}: ПОД НАПРЯЖЕНИЕМ"; ws.label.color = GameData.INFECTED; }
-            else ws.label.text = $"{ws.desc}: опоры {n}/{ws.pylons.Length}";
-        }
-
         // ── роутер (удержание) ──
         void MakeRouter(string key, Vector3 pos)
         {
@@ -197,22 +171,18 @@ namespace Virus.World
             Build.MeshBox(root, new Vector3(0.5f, 0.7f, 0.9f), Mats.Plastic(new Color(0.5f, 0.52f, 0.56f)), new Vector3(0, 2.2f, 0));
             var led = Mats.Neon(on ? GameData.INFECTED : new Color(0.9f, 0.3f, 0.2f), 1.8f);
             Build.MeshBox(root, Vector3.one * 0.12f, led, new Vector3(-0.3f, 2.35f, 0.3f));
-            var lbl = Build.Label(root, $"РОУТЕР ЛИФТА\n{(on ? "АКТИВЕН" : "[E держать] активировать")}", new Vector3(0, 3.4f, 0), 2.4f,
-                on ? GameData.INFECTED : new Color(0.4f, 0.8f, 1f));
             if (!on)
             {
                 var it = MakeInteract(root, new Vector3(0, 2, 0), 2.8f);
-                it.prompt = "РОУТЕР: активация…";
+                it.prompt = "[E держать] РОУТЕР ЛИФТА: активация…";
                 it.holdSeconds = 2f;
                 it.enabledFn = () => !S.Flag("router:" + key);
                 it.onInteract = () =>
                 {
                     S.SetFlag("router:" + key);
                     led.SetColor("_EmissionColor", (Color)GameData.INFECTED * 1.8f);
-                    lbl.text = "РОУТЕР ЛИФТА\nАКТИВЕН";
-                    lbl.color = GameData.INFECTED;
                     _hud?.Toast("Роутер активен");
-                    RefreshPowerLabels();
+                    RefreshPower();
                 };
             }
         }
@@ -227,20 +197,13 @@ namespace Virus.World
             Build.Solid(root, new Vector3(2.2f, 2f, 3f), Mats.Metal(new Color(0.4f, 0.42f, 0.38f), 0.5f), new Vector3(0, 1f, 0));
             var glow = Mats.Neon(on ? GameData.INFECTED : new Color(0.3f, 0.32f, 0.35f), on ? 2f : 0.3f);
             Build.MeshBox(root, new Vector3(0.2f, 1.1f, 1.1f), glow, new Vector3(1.15f, 1.1f, 0));
-            var lbl = Build.Label(root, "", new Vector3(0, 3f, 0), 2.6f, new Color(0.95f, 0.8f, 0.35f));
-            void refresh()
-            {
-                if (S.Flag("gen:" + key)) { lbl.text = $"ГЕНЕРАТОР {key.ToUpper()}\nРАБОТАЕТ"; lbl.color = GameData.INFECTED; }
-                else if (!S.Flag("wire:" + key)) { lbl.text = $"ГЕНЕРАТОР {key.ToUpper()}\nсначала протяни кабель"; lbl.color = new Color(0.85f, 0.4f, 0.3f); }
-                else { lbl.text = $"ГЕНЕРАТОР {key.ToUpper()}\n[E держать] запустить"; lbl.color = new Color(0.95f, 0.8f, 0.35f); }
-            }
-            refresh();
-            _genRefresh.Add(refresh);
             if (!on)
             {
                 var it = MakeInteract(root, new Vector3(0, 1, 0), 3.2f);
                 it.holdSeconds = 2.5f;
-                it.dynamicPrompt = () => S.Flag("wire:" + key) ? "запуск генератора…" : "ГЕНЕРАТОР: сначала протяни кабель от щита";
+                it.dynamicPrompt = () => S.Flag("wire:" + key)
+                    ? $"[E держать] ГЕНЕРАТОР {key.ToUpper()}: запуск…"
+                    : $"ГЕНЕРАТОР {key.ToUpper()}: сначала протяни кабель от щита";
                 it.enabledFn = () => !S.Flag("gen:" + key);
                 it.onInteract = () =>
                 {
@@ -248,17 +211,13 @@ namespace Virus.World
                     S.SetFlag("gen:" + key);
                     glow.SetColor("_EmissionColor", (Color)GameData.INFECTED * 2f);
                     _hud?.Toast($"Генераторы: {S.Stage3GeneratorsOn()}/3");
-                    RefreshPowerLabels();
+                    RefreshPower();
                 };
             }
         }
 
-        readonly System.Collections.Generic.List<System.Action> _genRefresh = new();
-
-        void RefreshPowerLabels()
+        void RefreshPower()
         {
-            foreach (var a in _genRefresh) a();
-            foreach (var k in _doors.Keys) RefreshDoorLabel(k);
             if (S.Stage3Powered()) _hud?.Toast("ЭТАП 3 ПОД НАПРЯЖЕНИЕМ: свет, лифты и двери активны");
             ApplyStage3Power();
             RefreshOracleShield();
@@ -266,7 +225,7 @@ namespace Virus.World
         }
 
         // ── лифт ──
-        void MakeLift(float x, float z, float yTop, string power, string cap)
+        void MakeLift(float x, float z, float yTop, string power)
         {
             var body = new GameObject("lift").transform;
             body.SetParent(transform, false);
@@ -277,8 +236,13 @@ namespace Virus.World
             Build.MeshBox(body, new Vector3(3.3f, 0.1f, 3.3f), Mats.Neon(new Color(0.3f, 0.8f, 1f), 1f), new Vector3(0, 0.2f, 0));
             for (int s = -1; s <= 1; s += 2)
                 Build.Solid(transform, new Vector3(0.25f, yTop + 1.5f, 0.25f), Mats.MetalDark(0.5f), new Vector3(x + s * 1.55f, (yTop + 1.5f) * 0.5f, z - 1.55f));
-            var lbl = Build.Label(transform, cap, new Vector3(x, yTop + 2.4f, z), 2.6f, new Color(0.3f, 0.8f, 1f));
-            _lifts.Add(new LiftState { body = body, x = x, z = z, y0 = 0.25f, y1 = yTop, power = power, label = lbl });
+            var pw = power;
+            MakeHint(new Vector3(x, 1f, z + 3f), 5f, () =>
+                (pw == "s2" ? S.Stage2LiftPowered() : S.Stage3Powered()) ? "Лифт работает" :
+                pw == "s2"
+                    ? $"ЛИФТ ОБЕСТОЧЕН: рычаги {(S.Flag("lever:s2a") ? 1 : 0) + (S.Flag("lever:s2b") ? 1 : 0)}/2 · провод {(S.Flag("wire:s2") ? "+" : "−")} · роутер {(S.Flag("router:s2") ? "+" : "−")}"
+                    : $"ЛИФТ ОБЕСТОЧЕН: генераторы {S.Stage3GeneratorsOn()}/3 · рубильник {(S.Flag("lever:s3master") ? "+" : "−")}");
+            _lifts.Add(new LiftState { body = body, x = x, z = z, y0 = 0.25f, y1 = yTop, power = power });
         }
 
         void TickLifts()
@@ -289,14 +253,8 @@ namespace Virus.World
                 if (!powered)
                 {
                     lf.body.localPosition = new Vector3(lf.x, lf.y0, lf.z);
-                    lf.label.text = lf.power == "s2"
-                        ? $"ЛИФТ ОБЕСТОЧЕН\nрычаги {(S.Flag("lever:s2a") ? 1 : 0) + (S.Flag("lever:s2b") ? 1 : 0)}/2 · провод {(S.Flag("wire:s2") ? "+" : "-")} · роутер {(S.Flag("router:s2") ? "+" : "-")}"
-                        : $"ЛИФТ ОБЕСТОЧЕН\nгенераторы {S.Stage3GeneratorsOn()}/3 · рубильник {(S.Flag("lever:s3master") ? "+" : "-")}";
-                    lf.label.color = new Color(0.85f, 0.4f, 0.3f);
                     continue;
                 }
-                lf.label.text = "ЛИФТ РАБОТАЕТ";
-                lf.label.color = new Color(0.3f, 0.8f, 1f);
                 lf.t += Time.deltaTime;
                 float ph = lf.t % LiftCycle, y;
                 if (ph < 3f) y = Mathf.Lerp(lf.y0, lf.y1, Mathf.SmoothStep(0, 1, ph / 3f));
@@ -322,8 +280,6 @@ namespace Virus.World
                 Build.MeshBox(body, Vector3.one * BlockEdge, heavy ? Mats.Rust(new Color(0.42f, 0.3f, 0.2f)) : Mats.DeckMetal(new Color(0.42f, 0.4f, 0.36f)), Vector3.zero);
                 Build.MeshBox(body, new Vector3(BlockEdge * 1.02f, 0.08f, BlockEdge * 1.02f),
                     Mats.Neon(heavy ? new Color(1f, 0.5f, 0.2f) : GameData.TIER_COLORS[0], 0.8f), new Vector3(0, BlockEdge * 0.5f - 0.05f, 0));
-                Build.Label(body, heavy ? "ТЯЖЁЛЫЙ БЛОК" : "БЛОК", new Vector3(0, 1.4f, 0), 2f,
-                    heavy ? new Color(1f, 0.6f, 0.3f) : new Color(0.7f, 0.85f, 0.95f));
                 _blocks[bd.id] = new BlockState { body = body, col = col, weight = bd.weight };
 
                 int id = bd.id;
@@ -387,15 +343,15 @@ namespace Virus.World
                 Build.MeshBox(transform, Vector3.one * 0.18f, Mats.Neon(new Color(0.2f, 0.8f, 0.95f), 1.6f), e);
             }
             var zs = new ZipState { a = a, b = b, flag = flagKey };
-            zs.label = Build.Label(transform, "", a + new Vector3(0, 1.1f, 0), 2.2f, new Color(0.2f, 0.8f, 0.95f));
             _zips.Add(zs);
             if (string.IsNullOrEmpty(flagKey) || S.Flag(flagKey)) DrawZip(zs);
-            RefreshZipLabel(zs);
 
             foreach (var (from, to) in new[] { (a, b), (b, a) })
             {
                 var it = MakeInteract(transform, from, 2.6f);
-                it.prompt = "[E] ПРОВОД: перелёт на ту сторону";
+                it.dynamicPrompt = () => string.IsNullOrEmpty(zs.flag) || S.Flag(zs.flag)
+                    ? "[E] ПРОВОД: перелёт на ту сторону"
+                    : "провод обесточен (кнопка перехода на стене)";
                 it.enabledFn = () => string.IsNullOrEmpty(zs.flag) || S.Flag(zs.flag);
                 var f = from; var t2 = to;
                 it.onInteract = () => RideZip(f, t2);
@@ -405,7 +361,7 @@ namespace Virus.World
         public void DrawZipByFlag(string flagKey)
         {
             foreach (var z in _zips)
-                if (z.flag == flagKey) { DrawZip(z); RefreshZipLabel(z); }
+                if (z.flag == flagKey) DrawZip(z);
         }
 
         void DrawZip(ZipState z)
@@ -421,13 +377,6 @@ namespace Virus.World
                 var seg = Build.MeshBox(transform, new Vector3(0.07f, 0.07f, Vector3.Distance(p0, p1)), Mats.Neon(new Color(0.2f, 0.8f, 0.95f), 0.9f), (p0 + p1) * 0.5f);
                 seg.transform.rotation = Quaternion.LookRotation(p1 - p0);
             }
-        }
-
-        void RefreshZipLabel(ZipState z)
-        {
-            if (z.label == null) return;
-            z.label.text = string.IsNullOrEmpty(z.flag) || S.Flag(z.flag)
-                ? "ПРОВОД [E] — перелёт" : "провод обесточен\n(кнопка перехода на стене)";
         }
 
         // ── лазеры этапа 3 ──

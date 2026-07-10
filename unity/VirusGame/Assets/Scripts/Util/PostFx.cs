@@ -4,8 +4,10 @@ using UnityEngine.Rendering.Universal;
 
 namespace Virus.Util
 {
-    // Кинематографичный пост-процессинг URP: bloom заставляет неон светиться,
-    // виньетка и ACES дают «плёночную» картинку. Без URP тихо выключается.
+    // Пост-процессинг URP в духе REPO/RV There Yet: РЕЗКАЯ картинка
+    // (никакого FXAA — он мылит, геометрию сглаживает MSAA 4), высокий
+    // контраст, плотный чёрный, узкий блюм только на ярких эмиссивах.
+    // Без URP тихо выключается.
     public static class PostFx
     {
         public static void AttachCamera(Camera cam)
@@ -14,7 +16,7 @@ namespace Virus.Util
             var data = cam.GetUniversalAdditionalCameraData();
             if (data == null) return;
             data.renderPostProcessing = true;
-            data.antialiasing = AntialiasingMode.FastApproximateAntialiasing;
+            data.antialiasing = AntialiasingMode.None;   // резкость: только MSAA
         }
 
         public static void EnsureVolume()
@@ -27,21 +29,21 @@ namespace Virus.Util
             vol.isGlobal = true;
             var profile = ScriptableObject.CreateInstance<VolumeProfile>();
 
-            // мягкий блюм: светятся только по-настоящему яркие эмиссивы,
-            // а не каждый светлый пиксель (иначе скины — «снежки»)
+            // узкий блюм: только по-настоящему яркие эмиссивы, без «дымки»
             var bloom = profile.Add<Bloom>(true);
-            bloom.intensity.value = 0.65f;
-            bloom.threshold.value = 1.15f;
-            bloom.scatter.value = 0.55f;
+            bloom.intensity.value = 0.4f;
+            bloom.threshold.value = 1.35f;
+            bloom.scatter.value = 0.4f;
 
             var vig = profile.Add<Vignette>(true);
-            vig.intensity.value = 0.22f;
-            vig.smoothness.value = 0.42f;
+            vig.intensity.value = 0.16f;
+            vig.smoothness.value = 0.5f;
 
+            // контрастный грейдинг: света ярче, тени глубже, цвет живее
             var ca = profile.Add<ColorAdjustments>(true);
-            ca.postExposure.value = 0.12f;
-            ca.saturation.value = 4f;
-            ca.contrast.value = 4f;
+            ca.postExposure.value = 0.3f;
+            ca.saturation.value = 10f;
+            ca.contrast.value = 22f;
 
             var tone = profile.Add<Tonemapping>(true);
             tone.mode.value = TonemappingMode.ACES;

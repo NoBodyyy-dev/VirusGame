@@ -21,11 +21,11 @@ namespace Virus.World
         UI.Hud _hud;
 
         // ── состояния интерактива ──
-        class DoorState { public GridData.DoorDef def; public GameObject mesh, body; public TextMesh label; public Vector3 pos; }
+        class DoorState { public GridData.DoorDef def; public GameObject mesh, body; public Vector3 pos; }
         readonly Dictionary<string, DoorState> _doors = new();
-        class WireState { public string key; public Vector3[] pylons; public Material[] orbs; public Color color; public string desc; public TextMesh label; }
+        class WireState { public string key; public Vector3[] pylons; public Material[] orbs; public Color color; public string desc; }
         readonly Dictionary<string, WireState> _wires = new();
-        class LiftState { public Transform body; public float x, z, y0, y1, t; public string power; public TextMesh label; }
+        class LiftState { public Transform body; public float x, z, y0, y1, t; public string power; }
         readonly List<LiftState> _lifts = new();
         class BeamState { public GameObject beam; public Vector3 a, b; public float phase; }
         readonly List<BeamState> _beams = new();
@@ -33,12 +33,12 @@ namespace Virus.World
         readonly List<CeilState> _ceils = new();
         class BotState { public Transform node; public Vector3 wp; public float t; }
         readonly List<BotState> _robots = new();
-        class TerrState { public Vector3 pos; public TextMesh label; public float prog; public Material mat; }
+        class TerrState { public Vector3 pos; public Transform pillar; public float prog; public Material mat; }
         readonly Dictionary<string, TerrState> _terrs = new();
         class BlockState { public Transform body; public BoxCollider col; public int weight; }
         readonly Dictionary<int, BlockState> _blocks = new();
         int _carryBlock = -1;
-        class ZipState { public Vector3 a, b; public string flag; public bool drawn; public TextMesh label; }
+        class ZipState { public Vector3 a, b; public string flag; public bool drawn; }
         readonly List<ZipState> _zips = new();
 
         GameObject _shield, _escapeGo;
@@ -86,6 +86,7 @@ namespace Virus.World
             TickBoard();
             TickMotes();
             TickCarry();
+            TickHints();
         }
 
         void UpdateObjective()
@@ -203,19 +204,9 @@ namespace Virus.World
             var pass = Mats.Concrete(new Color(0.38f, 0.39f, 0.42f));
             Build.Solid(transform, new Vector3(4, 0.5f, 2), pass, new Vector3(0, -0.25f, -7));
             for (int s = -1; s <= 1; s += 2) Build.Solid(transform, new Vector3(WallT, DoorH, 2), pass, new Vector3(s * 2.5f, DoorH * 0.5f, -7));
-            // надписи уровней (как на карте)
-            Title("0 УРОВЕНЬ · ОБУЧЕНИЕ", new Vector3(0, 7.5f, 18), new Color(0.65f, 0.75f, 0.85f));
-            Title("1 УРОВЕНЬ", new Vector3(0, 7.5f, -26), GameData.TIER_COLORS[0]);
-            Title("1 УРОВЕНЬ", new Vector3(32, 7.5f, -41), GameData.TIER_COLORS[0]);
-            Title("2 УРОВЕНЬ", new Vector3(47, 8.5f, -97), GameData.TIER_COLORS[1]);
-            Title("2 УРОВЕНЬ", new Vector3(98, 10.5f, -130), GameData.TIER_COLORS[1]);
-            Title("3 УРОВЕНЬ", new Vector3(96, 8.5f, -194), GameData.TIER_COLORS[2]);
-            Title("3 УРОВЕНЬ", new Vector3(122, 9.5f, -245), GameData.TIER_COLORS[2]);
-            Title("ОРАКУЛ", new Vector3(124, 18f, -338), GameData.ORACLE);
+            // этапы различаются материалами/светом; гигантские надписи убраны —
+            // название этапа приходит подсказкой при входе (MakeHint в Stages)
         }
-
-        void Title(string text, Vector3 pos, Color c) =>
-            Build.Label(transform, text, pos, 22f, new Color(c.r, c.g, c.b, 0.55f));
 
         void LightRooms()
         {
@@ -261,8 +252,6 @@ namespace Virus.World
                     Build.MeshBox(root, new Vector3(1.3f, 0.12f, 0.05f), Mats.Plastic(new Color(0.1f, 0.11f, 0.13f)), new Vector3(-0.05f, 0.55f + k * 0.35f, 0.64f));
                 Build.MeshBox(root, new Vector3(0.5f, 0.5f, 0.5f), Mats.Neon(col, 1.2f), new Vector3(0, h + 0.35f, 0));
                 if (unlocked && !infected) Build.Omni(root, new Vector3(0, h + 0.6f, 0), col, 1.1f, 7f);
-                Build.Label(root, $"{n.name} · {(infected ? "ВЗЛОМАН" : unlocked ? "[E] ВЗЛОМ" : "ЗАПЕРТ")}",
-                    new Vector3(0, h + 1.5f, 0), 3.2f, col);
 
                 if (!infected)
                 {
@@ -330,6 +319,28 @@ namespace Virus.World
             var it = go.AddComponent<Interactable>();
             it.radius = radius;
             return it;
+        }
+
+        // ── подсказки по приближению: замена летающих текстов уроков/зон ──
+        // Тост показывается один раз за сессию при входе в радиус.
+        class Hint { public Vector3 pos; public float r; public System.Func<string> text; public bool shown; }
+        readonly List<Hint> _hints = new();
+
+        void MakeHint(Vector3 pos, float radius, System.Func<string> text) =>
+            _hints.Add(new Hint { pos = pos, r = radius, text = text });
+
+        void TickHints()
+        {
+            if (_player == null) return;
+            var pp = _player.transform.position;
+            foreach (var h in _hints)
+            {
+                if (h.shown) continue;
+                if (Vector3.Distance(pp, h.pos) > h.r) continue;
+                h.shown = true;
+                var msg = h.text();
+                if (!string.IsNullOrEmpty(msg)) _hud?.Toast(msg);
+            }
         }
 
         // ── нокдаун: вспышка, тост, телепорт к точке ──

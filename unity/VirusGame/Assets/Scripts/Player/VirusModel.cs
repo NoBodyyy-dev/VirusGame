@@ -5,11 +5,20 @@ using Virus.Util;
 
 namespace Virus.Player
 {
-    // Порт virus_models.gd: уникальное процедурное тело для каждого класса вируса.
-    // Полиморфный визуал: stage (0..3) добавляет детали по мере прокачки,
-    // на УР.3 — венец апекса; доп. ветка примешивает свою эмблему к скину.
+    // Процедурные скины вирусов (полный редизайн). Рецепт «второго поколения»:
+    // тёмный глянцевый корпус (PBR) + цветной эмиссив только в акцентах
+    // (ядро, швы, глаза) — силуэт читается светом, а не сплошным неоном.
+    // stage (0..3) наращивает броню/детали, на УР.3 — венец апекса,
+    // доп. ветка примешивает орбитальную эмблему. Вся анимация — VirusModelAnim.
     public static class VirusModel
     {
+        // корпусные материалы: тёмный панцирь и матовая «кость»
+        static Material Shell(Color tint) =>
+            Mats.Metal(new Color(tint.r * 0.16f + 0.05f, tint.g * 0.16f + 0.05f, tint.b * 0.16f + 0.07f), 0.35f);
+
+        static Material ShellMatte(Color tint) =>
+            Mats.Plastic(new Color(tint.r * 0.12f + 0.04f, tint.g * 0.12f + 0.04f, tint.b * 0.12f + 0.06f));
+
         public static GameObject Build(Transform parent, string cls, int stage, string secondary)
         {
             var color = GameData.CLASSES.TryGetValue(cls, out var ci) ? ci.color : new Color(0.6f, 0.72f, 0.78f);
@@ -31,50 +40,56 @@ namespace Virus.Player
             if (stage >= 3) AddApexCrown(root.transform, anim, color);
             if (!string.IsNullOrEmpty(secondary)) AddSecondaryEmblem(root.transform, anim, secondary);
 
-            // свет штамма
+            // свет штамма — мягкий, чтобы модель не «горела»
             var l = new GameObject("glow").AddComponent<Light>();
             l.transform.SetParent(root.transform, false);
             l.transform.localPosition = new Vector3(0, 1.2f, 0);
             l.type = LightType.Point;
             l.color = color;
-            l.intensity = 1.3f;
-            l.range = 5f;
+            l.intensity = 0.9f;
+            l.range = 4.5f;
             return root;
         }
 
-        // «баг»: глючный пищащий краб — форма игрока при 0 HP
+        // «баг»: глючный краб с мерцающим панцирем — форма игрока при 0 HP
         public static GameObject BuildBug(Transform parent, Color color)
         {
             var root = new GameObject("BugModel");
             root.transform.SetParent(parent, false);
-            var body = Prim(PrimitiveType.Cube, root.transform, new Vector3(0, 0.35f, 0),
-                new Vector3(0.5f, 0.32f, 0.42f), Mats.Neon(color * 0.7f, 1.4f));
+            var anim = root.AddComponent<VirusModelAnim>();
+            var shellM = ShellMatte(color);
+            var body = Prim(PrimitiveType.Cube, root.transform, new Vector3(0, 0.32f, 0),
+                new Vector3(0.52f, 0.28f, 0.44f), shellM);
+            anim.breath = body.transform;
+            // трещины панциря светятся и глитчуют
+            var crack = Mats.Neon(new Color(1f, 0.35f, 0.4f), 2.2f);
+            anim.flickers.Add(crack);
+            Prim(PrimitiveType.Cube, root.transform, new Vector3(0.1f, 0.42f, 0), new Vector3(0.34f, 0.03f, 0.46f), crack);
+            Prim(PrimitiveType.Cube, root.transform, new Vector3(-0.12f, 0.36f, 0.1f), new Vector3(0.03f, 0.14f, 0.3f), crack);
             for (int side = -1; side <= 1; side += 2)
             {
-                Prim(PrimitiveType.Sphere, root.transform, new Vector3(side * 0.13f, 0.52f, -0.18f),
-                    Vector3.one * 0.18f, Mats.Neon(Color.white, 3f));
-                Prim(PrimitiveType.Sphere, root.transform, new Vector3(side * 0.13f, 0.52f, -0.26f),
-                    Vector3.one * 0.08f, Mats.Plastic(new Color(0.02f, 0.02f, 0.03f)));
+                Prim(PrimitiveType.Sphere, root.transform, new Vector3(side * 0.13f, 0.5f, -0.2f),
+                    Vector3.one * 0.15f, Mats.Neon(new Color(1f, 0.5f, 0.5f), 3f));
                 for (int i = 0; i < 3; i++)
                 {
                     var leg = Prim(PrimitiveType.Cube, root.transform,
-                        new Vector3(side * 0.32f, 0.2f, -0.12f + 0.14f * i),
-                        new Vector3(0.22f, 0.04f, 0.04f), Mats.Neon(color, 1.6f));
-                    leg.transform.localRotation = Quaternion.Euler(0, 0, -30f * side);
+                        new Vector3(side * 0.34f, 0.16f, -0.14f + 0.15f * i),
+                        new Vector3(0.26f, 0.045f, 0.045f), shellM);
+                    leg.transform.localRotation = Quaternion.Euler(0, 0, -32f * side);
+                    anim.wiggles.Add((leg.transform, i * 1.3f + side));
                 }
             }
-            Util.Build.Label(root.transform, "SEGFAULT", new Vector3(0, 0.95f, 0), 2.4f, new Color(1f, 0.35f, 0.4f));
             return root;
         }
 
-        // ящик-маскировка трояна: неотличим от обычного лута
+        // ящик-маскировка трояна: неотличим от лут-ящика рейда
         public static GameObject BuildCrate(Transform parent)
         {
             var root = new GameObject("MorphCrate");
             root.transform.SetParent(parent, false);
+            var c = new Color(0.29f, 0.56f, 1f);
             Prim(PrimitiveType.Cube, root.transform, new Vector3(0, 0.45f, 0),
-                new Vector3(1f, 0.85f, 0.9f), Mats.Neon(new Color(0.29f, 0.56f, 1f), 0.9f));
-            Util.Build.Label(root.transform, "точно_не_вирус.box\n◈ 18", new Vector3(0, 1.35f, 0), 2.2f, new Color(0.29f, 0.56f, 1f));
+                new Vector3(1.05f, 0.85f, 0.9f), Mats.Neon(c, 0.9f));
             return root;
         }
 
@@ -107,235 +122,357 @@ namespace Virus.Player
             return pivot;
         }
 
+        // сегментное кольцо из «пластин» — техно-обруч вместо бус
+        static Transform PlateRing(Transform parent, Vector3 pos, float radius, int count, Vector3 plate, Material m, float tiltX = 0f)
+        {
+            var pivot = new GameObject("plateRing").transform;
+            pivot.SetParent(parent, false);
+            pivot.localPosition = pos;
+            pivot.localRotation = Quaternion.Euler(tiltX, 0, 0);
+            for (int i = 0; i < count; i++)
+            {
+                float a = Mathf.PI * 2f * i / count;
+                var p = Prim(PrimitiveType.Cube, pivot, new Vector3(Mathf.Cos(a) * radius, 0, Mathf.Sin(a) * radius), plate, m);
+                p.transform.localRotation = Quaternion.Euler(0, -a * Mathf.Rad2Deg, 0);
+            }
+            return pivot;
+        }
+
         static void Spike(Transform parent, Vector3 center, Vector3 dir, float len, Material m, Material tipM)
         {
             var sp = Prim(PrimitiveType.Capsule, parent, center + dir * (0.42f + len * 0.4f),
-                new Vector3(len * 0.35f, len * 0.5f, len * 0.35f), m);
+                new Vector3(len * 0.3f, len * 0.5f, len * 0.3f), m);
             sp.transform.up = dir;
             Prim(PrimitiveType.Sphere, parent, center + dir * (0.42f + len * 0.95f),
-                Vector3.one * len * 0.32f, tipM);
+                Vector3.one * len * 0.26f, tipM);
         }
 
         static void Eyes(Transform parent, Vector3 at, float r, Color c)
         {
             for (int side = -1; side <= 1; side += 2)
-                Prim(PrimitiveType.Sphere, parent, at + new Vector3(side * 0.16f, 0, 0),
-                    Vector3.one * r * 2f, Mats.Neon(Color.Lerp(Color.white, c, 0.25f), 3.5f));
+            {
+                // тёмная глазница + яркий зрачок: взгляд читается издалека
+                Prim(PrimitiveType.Sphere, parent, at + new Vector3(side * 0.15f, 0, 0.015f),
+                    Vector3.one * r * 2.8f, ShellMatte(c));
+                Prim(PrimitiveType.Sphere, parent, at + new Vector3(side * 0.15f, 0, -0.02f),
+                    Vector3.one * r * 1.8f, Mats.Neon(Color.Lerp(Color.white, c, 0.2f), 3.5f));
+            }
         }
 
-        // ── БАЗОВЫЙ ПРОТО-ШТАММ: у всех одинаковый на старте ──
+        // ── БАЗОВЫЙ ПРОТО-ШТАММ: тёмная капсула-зонд с ярким ядром ──
         static void BuildBase(Transform t, VirusModelAnim anim, Color c)
         {
             var core = new GameObject("core").transform;
             core.SetParent(t, false);
             core.localPosition = new Vector3(0, 0.95f, 0);
             anim.breath = core;
-            Prim(PrimitiveType.Sphere, core, Vector3.zero, Vector3.one * 0.84f, Mats.Neon(c, 0.4f));
-            Prim(PrimitiveType.Sphere, core, Vector3.zero, Vector3.one * 0.36f, Mats.Neon(c, 3f));
-            var rng = new System.Random(3);
-            for (int i = 0; i < 10; i++)
+            anim.bob = core;
+            // корпус из двух получаш: тёмный панцирь со светящимся швом экватора
+            Prim(PrimitiveType.Sphere, core, new Vector3(0, 0.12f, 0), new Vector3(0.78f, 0.56f, 0.78f), Shell(c));
+            Prim(PrimitiveType.Sphere, core, new Vector3(0, -0.12f, 0), new Vector3(0.72f, 0.5f, 0.72f), Shell(c));
+            // видимый шов: сегментное светящееся кольцо ПОВЕРХ панциря
+            PlateRing(core, Vector3.zero, 0.37f, 14, new Vector3(0.1f, 0.05f, 0.03f), Mats.Neon(c, 2.6f));
+            Eyes(core, new Vector3(0, 0.14f, -0.32f), 0.07f, c);
+            // техно-обруч из тёмных пластин на орбите
+            var halo = PlateRing(core, Vector3.zero, 0.54f, 9, new Vector3(0.14f, 0.07f, 0.04f), Shell(c));
+            anim.spins.Add((halo, Vector3.up, 40f));
+            // три светящиеся «линзы» на верхней чаше
+            for (int i = 0; i < 3; i++)
             {
-                var dir = new Vector3((float)rng.NextDouble() * 2 - 1, (float)rng.NextDouble() * 1.6f - 0.6f,
-                    (float)rng.NextDouble() * 2 - 1).normalized;
-                Spike(core, Vector3.zero, dir, 0.24f, Mats.Neon(c, 1.2f), Mats.Neon(Color.Lerp(c, Color.white, 0.3f), 1.5f));
+                float a = Mathf.PI * 2f * i / 3f + 0.5f;
+                Prim(PrimitiveType.Sphere, core, new Vector3(Mathf.Cos(a) * 0.26f, 0.28f, Mathf.Sin(a) * 0.26f),
+                    Vector3.one * 0.11f, Mats.Neon(c, 3f));
             }
-            Eyes(core, new Vector3(0, 0.1f, -0.36f), 0.08f, c);
-            var ring = Ring(core, Vector3.zero, 0.54f, 10, 0.05f, Mats.Neon(c, 1.2f), 70f);
-            anim.spins.Add((ring, Vector3.up, 54f));
         }
 
-        // ── ЧЕРВЬ: членистый бур-паразит ──
+        // ── ЧЕРВЬ: бронированный бур-паразит, вздыбленный S-дугой ──
         static void BuildWorm(Transform t, VirusModelAnim anim, Color c, int stage)
         {
+            var shell = Shell(c);
             var head = new GameObject("head").transform;
             head.SetParent(t, false);
-            head.localPosition = new Vector3(0, 0.95f, 0);
+            head.localPosition = new Vector3(0, 1.05f, -0.15f);
             anim.breath = head;
-            Prim(PrimitiveType.Sphere, head, Vector3.zero, Vector3.one * 0.68f, Mats.Neon(c, 0.45f));
-            Ring(head, new Vector3(0, 0.05f, 0.05f), 0.32f, 8, 0.05f, Mats.Neon(c, 1.4f), 78f);
-            // вращающийся бур
+            // голова: тёмный купол + светящаяся пасть-воронка
+            Prim(PrimitiveType.Sphere, head, Vector3.zero, new Vector3(0.62f, 0.58f, 0.62f), shell);
+            PlateRing(head, new Vector3(0, 0.02f, 0), 0.33f, 8, new Vector3(0.16f, 0.1f, 0.05f), shell, 80f);
+            Prim(PrimitiveType.Sphere, head, new Vector3(0, 0, -0.28f), Vector3.one * 0.3f, Mats.Neon(c, 2.4f));
+            // вращающийся бур из трёх лопастей
             var drill = new GameObject("drill").transform;
             drill.SetParent(head, false);
-            drill.localPosition = new Vector3(0, 0, -0.42f);
-            var dm = Prim(PrimitiveType.Capsule, drill, Vector3.zero, new Vector3(0.3f, 0.3f, 0.3f), Mats.Neon(c, 2.2f));
-            dm.transform.localRotation = Quaternion.Euler(-90, 0, 0);
+            drill.localPosition = new Vector3(0, 0, -0.46f);
             for (int k = 0; k < 3; k++)
-                Ring(drill, new Vector3(0, 0, -0.05f - 0.12f * k), 0.08f + 0.05f * k, 6, 0.03f,
-                    Mats.Neon(Color.Lerp(c, Color.white, 0.25f), 2.8f), 90f);
-            anim.spins.Add((drill, Vector3.forward, 320f));
-            Eyes(head, new Vector3(0, 0.12f, -0.28f), 0.07f, c);
-            // сегменты хвоста
-            int count = 4 + stage;
+            {
+                var blade = Prim(PrimitiveType.Cube, drill, Vector3.zero, new Vector3(0.07f, 0.34f, 0.2f),
+                    Mats.Metal(new Color(0.55f, 0.58f, 0.62f), 0.25f));
+                blade.transform.localRotation = Quaternion.Euler(28, 0, k * 120f);
+                blade.transform.localPosition = blade.transform.localRotation * new Vector3(0, 0.12f, -0.1f);
+            }
+            Prim(PrimitiveType.Sphere, drill, new Vector3(0, 0, -0.2f), Vector3.one * 0.14f,
+                Mats.Neon(Color.Lerp(c, Color.white, 0.4f), 3.5f));
+            anim.spins.Add((drill, Vector3.forward, 340f));
+            Eyes(head, new Vector3(0, 0.2f, -0.24f), 0.06f, c);
+            // сегменты тела: бронированные кольца по S-дуге, к хвосту тоньше
+            int count = 5 + stage;
             for (int i = 0; i < count; i++)
             {
-                float r = 0.27f - 0.03f * i;
-                var seg = Prim(PrimitiveType.Sphere, t,
-                    new Vector3(0, 0.95f - 0.05f * i, 0.42f + 0.32f * i), Vector3.one * r * 2f,
-                    Mats.Neon(c, Mathf.Max(0.5f - 0.06f * i, 0.15f)));
-                anim.wiggles.Add((seg.transform, i * 0.7f));
+                float k = (float)i / count;
+                float r = 0.3f - 0.05f * k * 3f * 0.33f - 0.02f * i * 0.5f;
+                r = Mathf.Max(0.3f - 0.028f * i, 0.12f);
+                var pos = new Vector3(Mathf.Sin(i * 0.55f) * 0.14f,
+                    1.0f - Mathf.Sin(k * 1.9f) * 0.55f, 0.28f + 0.27f * i);
+                var seg = Prim(PrimitiveType.Sphere, t, pos, Vector3.one * r * 2f, shell);
+                // светящийся межсегментный зазор
+                if (i > 0)
+                    Prim(PrimitiveType.Sphere, t, Vector3.Lerp(pos, new Vector3(Mathf.Sin((i - 1) * 0.55f) * 0.14f,
+                        1.0f - Mathf.Sin((i - 1f) / count * 1.9f) * 0.55f, 0.28f + 0.27f * (i - 1)), 0.5f),
+                        Vector3.one * r * 1.5f, Mats.Neon(c, 1.3f));
+                anim.wiggles.Add((seg.transform, i * 0.65f));
             }
         }
 
-        // ── ТРОЯН: коробчатый мимик с маской ──
+        // ── ТРОЯН: подарочный ящик-мимик с приоткрытой крышкой ──
         static void BuildTrojan(Transform t, VirusModelAnim anim, Color c, int stage)
         {
             var body = new GameObject("body").transform;
             body.SetParent(t, false);
-            body.localPosition = new Vector3(0, 0.9f, 0);
+            body.localPosition = new Vector3(0, 0.88f, 0);
             anim.breath = body;
-            Prim(PrimitiveType.Cube, body, Vector3.zero, new Vector3(0.72f, 0.86f, 0.6f), Mats.Plastic(new Color(0.07f, 0.09f, 0.12f)));
-            // швы-подсветка
-            Prim(PrimitiveType.Cube, body, new Vector3(0, 0.1f, 0), new Vector3(0.74f, 0.04f, 0.62f), Mats.Neon(c, 2f));
-            Prim(PrimitiveType.Cube, body, new Vector3(0, -0.22f, 0), new Vector3(0.74f, 0.03f, 0.62f), Mats.Neon(c, 1.4f));
-            // маска-лицо
-            Prim(PrimitiveType.Cube, body, new Vector3(0, 0.22f, -0.33f), new Vector3(0.4f, 0.3f, 0.05f), Mats.Neon(Color.Lerp(c, Color.white, 0.15f), 1.2f));
-            Eyes(body, new Vector3(0, 0.24f, -0.38f), 0.06f, c);
-            if (stage >= 2)   // фальш-крышка и «лапки-защёлки»
+            var shell = ShellMatte(c);
+            Prim(PrimitiveType.Cube, body, Vector3.zero, new Vector3(0.74f, 0.8f, 0.62f), shell);
+            // «подарочная лента» крест-накрест — фирменный обман
+            Prim(PrimitiveType.Cube, body, Vector3.zero, new Vector3(0.78f, 0.14f, 0.66f), Mats.Neon(c, 1.2f));
+            Prim(PrimitiveType.Cube, body, Vector3.zero, new Vector3(0.16f, 0.84f, 0.66f), Mats.Neon(c, 1.2f));
+            // приоткрытая крышка, из щели льётся свет
+            var lid = Prim(PrimitiveType.Cube, body, new Vector3(0, 0.46f, 0.06f), new Vector3(0.8f, 0.1f, 0.68f), shell);
+            lid.transform.localRotation = Quaternion.Euler(-9f, 0, 0);
+            Prim(PrimitiveType.Cube, body, new Vector3(0, 0.42f, -0.02f), new Vector3(0.7f, 0.045f, 0.56f),
+                Mats.Neon(Color.Lerp(c, Color.white, 0.35f), 3.2f));
+            // глаза из щели-«рта»
+            Prim(PrimitiveType.Cube, body, new Vector3(0, 0.12f, -0.325f), new Vector3(0.46f, 0.1f, 0.03f), Mats.Neon(c, 0.6f));
+            Eyes(body, new Vector3(0, 0.13f, -0.33f), 0.055f, c);
+            // лапки-защёлки по бокам
+            for (int side = -1; side <= 1; side += 2)
+                for (int i = 0; i < 2; i++)
+                {
+                    var claw = Prim(PrimitiveType.Cube, body, new Vector3(side * 0.42f, -0.18f + i * 0.28f, -0.05f),
+                        new Vector3(0.07f, 0.2f, 0.12f), Shell(c));
+                    claw.transform.localRotation = Quaternion.Euler(0, 0, side * 12f);
+                }
+            if (stage >= 2)   // сургучная печать и цепочка «сертификатов»
             {
-                Prim(PrimitiveType.Cube, body, new Vector3(0, 0.48f, 0), new Vector3(0.8f, 0.08f, 0.66f), Mats.Plastic(new Color(0.1f, 0.12f, 0.16f)));
-                for (int side = -1; side <= 1; side += 2)
-                    Prim(PrimitiveType.Cube, body, new Vector3(side * 0.4f, -0.1f, 0), new Vector3(0.06f, 0.5f, 0.2f), Mats.Neon(c, 0.9f));
+                Prim(PrimitiveType.Sphere, body, new Vector3(0.22f, 0.02f, -0.34f), Vector3.one * 0.16f, Mats.Neon(new Color(1f, 0.4f, 0.35f), 2f));
+                var tags = Ring(body, new Vector3(0, -0.46f, 0), 0.5f, 6, 0.045f, Mats.Neon(c, 1.4f));
+                anim.spins.Add((tags, Vector3.up, 38f));
             }
-            var ring = Ring(body, new Vector3(0, -0.42f, 0), 0.5f, 8, 0.04f, Mats.Neon(c, 1.1f));
-            anim.spins.Add((ring, Vector3.up, 40f));
         }
 
-        // ── RANSOMWARE: тяжёлый замок-танк ──
+        // ── RANSOMWARE: кованый замок-танк на цепях ──
         static void BuildRansomware(Transform t, VirusModelAnim anim, Color c, int stage)
         {
             var body = new GameObject("body").transform;
             body.SetParent(t, false);
-            body.localPosition = new Vector3(0, 0.85f, 0);
+            body.localPosition = new Vector3(0, 0.82f, 0);
             anim.breath = body;
-            Prim(PrimitiveType.Cube, body, Vector3.zero, new Vector3(0.9f, 0.8f, 0.62f), Mats.Metal(new Color(0.16f, 0.1f, 0.14f), 0.5f));
-            // дужка замка
-            var shackle = new GameObject("shackle").transform;
-            shackle.SetParent(body, false);
-            shackle.localPosition = new Vector3(0, 0.55f, 0);
-            for (int i = 0; i <= 6; i++)
+            var iron = Mats.Metal(new Color(0.14f, 0.1f, 0.14f), 0.45f);
+            var steel = Mats.Metal(new Color(0.5f, 0.5f, 0.56f), 0.25f);
+            // корпус с фасками (три слоя) — читается как кованый
+            Prim(PrimitiveType.Cube, body, Vector3.zero, new Vector3(0.88f, 0.76f, 0.56f), iron);
+            Prim(PrimitiveType.Cube, body, new Vector3(0, 0, -0.02f), new Vector3(0.78f, 0.66f, 0.58f), iron);
+            Prim(PrimitiveType.Cube, body, new Vector3(0, 0.3f, 0), new Vector3(0.92f, 0.12f, 0.6f), steel);
+            Prim(PrimitiveType.Cube, body, new Vector3(0, -0.32f, 0), new Vector3(0.92f, 0.12f, 0.6f), steel);
+            // дужка из капсул — гладкая арка
+            for (int i = 0; i <= 8; i++)
             {
-                float a = Mathf.PI * i / 6f;
-                Prim(PrimitiveType.Sphere, shackle, new Vector3(Mathf.Cos(a) * 0.32f, Mathf.Sin(a) * 0.32f, 0),
-                    Vector3.one * 0.14f, Mats.Metal(new Color(0.5f, 0.5f, 0.55f), 0.7f));
+                float a = Mathf.PI * i / 8f;
+                var seg = Prim(PrimitiveType.Capsule, body,
+                    new Vector3(Mathf.Cos(a) * 0.3f, 0.42f + Mathf.Sin(a) * 0.3f, 0),
+                    new Vector3(0.1f, 0.09f, 0.1f), steel);
+                seg.transform.localRotation = Quaternion.Euler(0, 0, a * Mathf.Rad2Deg + 90f);
             }
-            // скважина и заклёпки
-            Prim(PrimitiveType.Sphere, body, new Vector3(0, 0.08f, -0.33f), Vector3.one * 0.18f, Mats.Neon(c, 2.6f));
-            Prim(PrimitiveType.Cube, body, new Vector3(0, -0.1f, -0.33f), new Vector3(0.07f, 0.22f, 0.04f), Mats.Neon(c, 2.6f));
+            // скважина: светится и «дышит» (медленный пульс)
+            var hole = Mats.Neon(c, 3f);
+            anim.pulses.Add((hole, c * 3f));
+            Prim(PrimitiveType.Sphere, body, new Vector3(0, 0.06f, -0.3f), Vector3.one * 0.17f, hole);
+            Prim(PrimitiveType.Cube, body, new Vector3(0, -0.1f, -0.3f), new Vector3(0.06f, 0.2f, 0.04f), hole);
+            // заклёпки по периметру лицевой панели
             for (int sx = -1; sx <= 1; sx += 2)
                 for (int sy = -1; sy <= 1; sy += 2)
-                    Prim(PrimitiveType.Sphere, body, new Vector3(sx * 0.36f, sy * 0.28f, -0.32f),
-                        Vector3.one * 0.08f, Mats.Metal(new Color(0.45f, 0.45f, 0.5f), 0.8f));
-            Eyes(body, new Vector3(0, 0.3f, -0.34f), 0.055f, c);
-            if (stage >= 2)   // цепи по бокам
+                    Prim(PrimitiveType.Sphere, body, new Vector3(sx * 0.35f, sy * 0.27f, -0.3f),
+                        Vector3.one * 0.07f, steel);
+            Eyes(body, new Vector3(0, 0.28f, -0.31f), 0.05f, c);
+            if (stage >= 2)   // провисающие цепи по бокам
                 for (int side = -1; side <= 1; side += 2)
-                    for (int i = 0; i < 3; i++)
-                        Prim(PrimitiveType.Sphere, body, new Vector3(side * 0.5f, 0.25f - i * 0.22f, 0),
-                            Vector3.one * 0.11f, Mats.Metal(new Color(0.4f, 0.4f, 0.45f), 0.7f));
+                    for (int i = 0; i < 4; i++)
+                        Prim(PrimitiveType.Sphere, body,
+                            new Vector3(side * (0.48f + Mathf.Sin(i * 1.1f) * 0.05f), 0.3f - i * 0.2f, 0.05f),
+                            Vector3.one * 0.1f, steel);
         }
 
-        // ── SPYWARE: летающий глаз-разведчик ──
+        // ── SPYWARE: дрон-глаз с диафрагмой и антеннами ──
         static void BuildSpyware(Transform t, VirusModelAnim anim, Color c, int stage)
         {
             var eye = new GameObject("eye").transform;
             eye.SetParent(t, false);
-            eye.localPosition = new Vector3(0, 1.05f, 0);
+            eye.localPosition = new Vector3(0, 1.1f, 0);
             anim.breath = eye;
-            Prim(PrimitiveType.Sphere, eye, Vector3.zero, Vector3.one * 0.7f, Mats.Neon(c, 0.4f));
-            Prim(PrimitiveType.Sphere, eye, new Vector3(0, 0, -0.26f), Vector3.one * 0.34f, Mats.Neon(Color.white, 1.8f));
-            Prim(PrimitiveType.Sphere, eye, new Vector3(0, 0, -0.37f), Vector3.one * 0.16f, Mats.Neon(new Color(1f, 0.3f, 0.3f), 4f));
-            // антенны-стебельки
+            anim.bob = eye;
+            // тёмный кожух, белок, радужка, красный зрачок
+            Prim(PrimitiveType.Sphere, eye, Vector3.zero, Vector3.one * 0.66f, Shell(c));
+            Prim(PrimitiveType.Sphere, eye, new Vector3(0, 0, -0.2f), Vector3.one * 0.42f, Mats.Plastic(new Color(0.85f, 0.88f, 0.9f)));
+            Prim(PrimitiveType.Sphere, eye, new Vector3(0, 0, -0.31f), Vector3.one * 0.22f, Mats.Neon(c, 1.8f));
+            Prim(PrimitiveType.Sphere, eye, new Vector3(0, 0, -0.37f), Vector3.one * 0.1f, Mats.Neon(new Color(1f, 0.25f, 0.25f), 4.5f));
+            // лепестки диафрагмы вокруг линзы
+            var iris = new GameObject("iris").transform;
+            iris.SetParent(eye, false);
+            iris.localPosition = new Vector3(0, 0, -0.3f);
+            for (int i = 0; i < 6; i++)
+            {
+                float a = Mathf.PI * 2f * i / 6f;
+                var petal = Prim(PrimitiveType.Cube, iris,
+                    new Vector3(Mathf.Cos(a) * 0.22f, Mathf.Sin(a) * 0.22f, 0),
+                    new Vector3(0.12f, 0.04f, 0.03f), Shell(c));
+                petal.transform.localRotation = Quaternion.Euler(0, 0, a * Mathf.Rad2Deg + 90f);
+            }
+            anim.spins.Add((iris, Vector3.forward, -30f));
+            // антенны и стабилизаторы
             int stalks = 3 + stage;
             for (int i = 0; i < stalks; i++)
             {
                 float a = Mathf.PI * 2f * i / stalks;
-                var dir = new Vector3(Mathf.Cos(a), 0.9f, Mathf.Sin(a)).normalized;
-                Spike(eye, Vector3.zero, dir, 0.3f, Mats.Neon(c, 1.2f), Mats.Neon(Color.Lerp(c, Color.white, 0.4f), 1.6f));
+                var dir = new Vector3(Mathf.Cos(a), 1f, Mathf.Sin(a)).normalized;
+                Spike(eye, Vector3.zero, dir, 0.3f, Shell(c), Mats.Neon(new Color(1f, 0.35f, 0.3f), 2.6f));
             }
-            var ring = Ring(eye, Vector3.zero, 0.52f, 12, 0.035f, Mats.Neon(c, 1.5f), 20f);
-            anim.spins.Add((ring, Vector3.up, 80f));
+            var gyro = PlateRing(eye, Vector3.zero, 0.52f, 10, new Vector3(0.14f, 0.04f, 0.04f), Shell(c), 18f);
+            anim.spins.Add((gyro, Vector3.up, 85f));
         }
 
-        // ── ADWARE: рой всплывающих окон ──
+        // ── ADWARE: ядро-«приманка» в вихре неоновых баннеров ──
         static void BuildAdware(Transform t, VirusModelAnim anim, Color c, int stage)
         {
             var core = new GameObject("core").transform;
             core.SetParent(t, false);
             core.localPosition = new Vector3(0, 0.95f, 0);
             anim.breath = core;
-            Prim(PrimitiveType.Sphere, core, Vector3.zero, Vector3.one * 0.6f, Mats.Neon(c, 0.5f));
-            Eyes(core, new Vector3(0, 0.08f, -0.26f), 0.07f, c);
-            var pivot = new GameObject("popups").transform;
-            pivot.SetParent(core, false);
-            int n = 4 + stage * 2;
+            anim.bob = core;
+            Prim(PrimitiveType.Sphere, core, Vector3.zero, Vector3.one * 0.52f, Shell(c));
+            Prim(PrimitiveType.Cube, core, Vector3.zero, new Vector3(0.56f, 0.05f, 0.56f), Mats.Neon(c, 2.2f));
+            Eyes(core, new Vector3(0, 0.08f, -0.24f), 0.06f, c);
+            // два встречных вихря панелей: разные размеры, цвет чередуется
+            var c2 = Color.Lerp(c, new Color(1f, 0.5f, 0.2f), 0.5f);
             var rng = new System.Random(11);
-            for (int i = 0; i < n; i++)
+            for (int layer = 0; layer < 2; layer++)
             {
-                float a = Mathf.PI * 2f * i / n;
-                var p = new Vector3(Mathf.Cos(a) * 0.62f, (float)rng.NextDouble() * 0.7f - 0.25f, Mathf.Sin(a) * 0.62f);
-                var panel = Prim(PrimitiveType.Cube, pivot, p, new Vector3(0.26f, 0.18f, 0.02f), Mats.Neon(c, 1.5f));
-                panel.transform.localRotation = Quaternion.Euler(0, -a * Mathf.Rad2Deg + 90f, 0);
-                // крестик закрытия
-                Prim(PrimitiveType.Cube, panel.transform, new Vector3(0.4f, 0.36f, -0.6f),
-                    new Vector3(0.14f, 0.14f, 0.2f), Mats.Neon(new Color(1f, 0.3f, 0.3f), 2.4f));
+                var pivot = new GameObject("popups" + layer).transform;
+                pivot.SetParent(core, false);
+                pivot.localRotation = Quaternion.Euler(layer * 14f, 0, -layer * 10f);
+                int n = 3 + stage + layer * 2;
+                for (int i = 0; i < n; i++)
+                {
+                    float a = Mathf.PI * 2f * i / n;
+                    float rr = 0.55f + layer * 0.24f;
+                    var p = new Vector3(Mathf.Cos(a) * rr, (float)rng.NextDouble() * 0.6f - 0.22f, Mathf.Sin(a) * rr);
+                    float w = 0.2f + (float)rng.NextDouble() * 0.14f;
+                    var col = i % 2 == 0 ? c : c2;
+                    var panel = Prim(PrimitiveType.Cube, pivot, p, new Vector3(w, w * 0.68f, 0.02f), Mats.Neon(col, 1.7f));
+                    panel.transform.localRotation = Quaternion.Euler(0, -a * Mathf.Rad2Deg + 90f, 0);
+                    // рамка и крестик закрытия
+                    Prim(PrimitiveType.Cube, panel.transform, new Vector3(0, 0.56f, 0), new Vector3(1.04f, 0.14f, 0.5f), ShellMatte(col));
+                    Prim(PrimitiveType.Cube, panel.transform, new Vector3(0.42f, 0.56f, -0.3f),
+                        new Vector3(0.15f, 0.12f, 0.3f), Mats.Neon(new Color(1f, 0.3f, 0.3f), 2.6f));
+                }
+                anim.spins.Add((pivot, Vector3.up, layer == 0 ? 36f : -24f));
             }
-            anim.spins.Add((pivot, Vector3.up, 34f));
         }
 
-        // ── ROOTKIT: тихий призрак в капюшоне ──
+        // ── ROOTKIT: бесплотный призрак — слоёная мантия и руки-фантомы ──
         static void BuildRootkit(Transform t, VirusModelAnim anim, Color c, int stage)
         {
             var body = new GameObject("body").transform;
             body.SetParent(t, false);
-            body.localPosition = new Vector3(0, 0.9f, 0);
+            body.localPosition = new Vector3(0, 0.95f, 0);
             anim.breath = body;
-            // мантия (тёмная капля) и светящаяся кромка
-            var robe = Prim(PrimitiveType.Capsule, body, Vector3.zero, new Vector3(0.6f, 0.6f, 0.6f), Mats.Plastic(new Color(0.05f, 0.04f, 0.09f)));
-            robe.transform.localScale = new Vector3(0.62f, 0.78f, 0.62f);
-            Ring(body, new Vector3(0, -0.55f, 0), 0.35f, 10, 0.035f, Mats.Neon(c, 1.6f));
-            // капюшон
-            Prim(PrimitiveType.Sphere, body, new Vector3(0, 0.5f, 0.05f), new Vector3(0.5f, 0.42f, 0.5f), Mats.Plastic(new Color(0.07f, 0.05f, 0.12f)));
-            // глаза из тени
-            Eyes(body, new Vector3(0, 0.5f, -0.2f), 0.06f, c);
+            anim.bob = body;
+            var cloth = ShellMatte(c);
+            // мантия из трёх сужающихся ярусов — рваный низ
+            Prim(PrimitiveType.Capsule, body, new Vector3(0, 0.1f, 0), new Vector3(0.56f, 0.52f, 0.56f), cloth);
+            Prim(PrimitiveType.Capsule, body, new Vector3(0, -0.28f, 0), new Vector3(0.66f, 0.4f, 0.66f), cloth);
+            for (int i = 0; i < 7; i++)
+            {
+                float a = Mathf.PI * 2f * i / 7f;
+                Prim(PrimitiveType.Cube, body,
+                    new Vector3(Mathf.Cos(a) * 0.28f, -0.6f - (i % 2) * 0.08f, Mathf.Sin(a) * 0.28f),
+                    new Vector3(0.14f, 0.22f, 0.1f), cloth);
+            }
+            // капюшон с провалом лица
+            Prim(PrimitiveType.Sphere, body, new Vector3(0, 0.52f, 0.04f), new Vector3(0.48f, 0.42f, 0.48f), cloth);
+            Prim(PrimitiveType.Sphere, body, new Vector3(0, 0.5f, -0.1f), new Vector3(0.34f, 0.3f, 0.3f), Mats.Plastic(new Color(0.01f, 0.01f, 0.02f)));
+            Eyes(body, new Vector3(0, 0.52f, -0.2f), 0.05f, c);
+            // парящие кисти рук
+            foreach (var side in new[] { -1, 1 })
+            {
+                var hand = Prim(PrimitiveType.Sphere, body, new Vector3(side * 0.44f, -0.05f, -0.18f),
+                    new Vector3(0.14f, 0.18f, 0.14f), cloth);
+                anim.wiggles.Add((hand.transform, side * 1.7f));
+                for (int f = 0; f < 3; f++)
+                    Prim(PrimitiveType.Capsule, hand.transform, new Vector3((f - 1) * 0.3f, -0.5f, 0),
+                        new Vector3(0.16f, 0.4f, 0.2f), cloth);
+            }
+            // кольцо тумана у пола
+            var mist = Ring(body, new Vector3(0, -0.72f, 0), 0.4f, 12, 0.05f, Mats.Neon(c, 0.8f));
+            anim.spins.Add((mist, Vector3.up, -22f));
             if (stage >= 2)
             {
-                var ring = Ring(body, new Vector3(0, 0.15f, 0), 0.55f, 6, 0.04f, Mats.Neon(c, 1.2f), 12f);
-                anim.spins.Add((ring, Vector3.up, -46f));
+                var runes = PlateRing(body, new Vector3(0, 0.12f, 0), 0.56f, 5, new Vector3(0.08f, 0.14f, 0.02f), Mats.Neon(c, 1.8f), 8f);
+                anim.spins.Add((runes, Vector3.up, -46f));
             }
         }
 
-        // ── BOTNET: ядро-оператор и рой дронов ──
+        // ── BOTNET: ядро-оператор и рой дронов-пирамидок на двух орбитах ──
         static void BuildBotnet(Transform t, VirusModelAnim anim, Color c, int stage)
         {
             var core = new GameObject("core").transform;
             core.SetParent(t, false);
             core.localPosition = new Vector3(0, 0.95f, 0);
             anim.breath = core;
-            Prim(PrimitiveType.Sphere, core, Vector3.zero, Vector3.one * 0.56f, Mats.Neon(c, 0.55f));
-            Eyes(core, new Vector3(0, 0.06f, -0.24f), 0.06f, c);
-            var swarm = new GameObject("swarm").transform;
-            swarm.SetParent(core, false);
-            int n = 3 + stage * 2;
-            for (int i = 0; i < n; i++)
+            anim.bob = core;
+            // ядро: тёмный октаэдр (куб на угол) со светящимися гранями
+            var hub = Prim(PrimitiveType.Cube, core, Vector3.zero, Vector3.one * 0.44f, Shell(c));
+            hub.transform.localRotation = Quaternion.Euler(45, 0, 45);
+            Prim(PrimitiveType.Cube, core, Vector3.zero, Vector3.one * 0.3f, Mats.Neon(c, 2.8f)).transform.localRotation = Quaternion.Euler(45, 0, 45);
+            Eyes(core, new Vector3(0, 0.05f, -0.3f), 0.055f, c);
+            // две встречные орбиты дронов
+            for (int layer = 0; layer < 2; layer++)
             {
-                float a = Mathf.PI * 2f * i / n;
-                var p = new Vector3(Mathf.Cos(a) * 0.7f, Mathf.Sin(a * 2f) * 0.22f, Mathf.Sin(a) * 0.7f);
-                Prim(PrimitiveType.Sphere, swarm, p, Vector3.one * 0.14f, Mats.Neon(c, 2.2f));
+                var swarm = new GameObject("swarm" + layer).transform;
+                swarm.SetParent(core, false);
+                swarm.localRotation = Quaternion.Euler(layer == 0 ? 12f : -18f, 0, layer * 9f);
+                int n = 3 + stage + layer;
+                for (int i = 0; i < n; i++)
+                {
+                    float a = Mathf.PI * 2f * i / n;
+                    float rr = 0.62f + layer * 0.2f;
+                    var p = new Vector3(Mathf.Cos(a) * rr, Mathf.Sin(a * 2f) * 0.14f, Mathf.Sin(a) * rr);
+                    var drone = Prim(PrimitiveType.Cube, swarm, p, Vector3.one * 0.13f, Shell(c));
+                    drone.transform.localRotation = Quaternion.Euler(45, -a * Mathf.Rad2Deg, 45);
+                    Prim(PrimitiveType.Sphere, drone.transform, Vector3.zero, Vector3.one * 0.6f, Mats.Neon(c, 2.4f));
+                }
+                anim.spins.Add((swarm, Vector3.up, layer == 0 ? 68f : -44f));
             }
-            anim.spins.Add((swarm, Vector3.up, 62f));
         }
 
         // ── УР.3: венец апекса поверх любого скина ──
         static void AddApexCrown(Transform t, VirusModelAnim anim, Color c)
         {
             var bright = Color.Lerp(c, Color.white, 0.35f);
-            var crown = Ring(t, new Vector3(0, 2.25f, 0), 0.37f, 9, 0.05f, Mats.Neon(bright, 3.2f), 12f);
-            anim.spins.Add((crown, Vector3.up, 150f));
+            var crown = PlateRing(t, new Vector3(0, 2.25f, 0), 0.36f, 7, new Vector3(0.07f, 0.2f, 0.03f), Mats.Neon(bright, 3f), 6f);
+            anim.spins.Add((crown, Vector3.up, 140f));
             for (int i = 0; i < 3; i++)
             {
                 float ang = Mathf.PI * 2f * i / 3f;
                 var shard = Prim(PrimitiveType.Capsule, t,
-                    new Vector3(Mathf.Cos(ang) * 0.37f, 2.42f, Mathf.Sin(ang) * 0.37f),
-                    new Vector3(0.07f, 0.12f, 0.07f), Mats.Neon(c, 2.6f));
+                    new Vector3(Mathf.Cos(ang) * 0.34f, 2.46f, Mathf.Sin(ang) * 0.34f),
+                    new Vector3(0.06f, 0.13f, 0.06f), Mats.Neon(c, 2.6f));
                 shard.transform.localRotation = Quaternion.Euler(Mathf.Sin(ang) * 17f, 0, -Mathf.Cos(ang) * 17f);
             }
         }
@@ -385,13 +522,19 @@ namespace Virus.Player
         }
     }
 
-    // дыхание, вращение колец и волна хвоста — вся анимация скина
+    // Анимация скина: дыхание, парение, вращение колец, волна хвоста,
+    // пульс эмиссива и глитч-мерцание (баг).
     public class VirusModelAnim : MonoBehaviour
     {
-        public Transform breath;
+        public Transform breath;                 // масштабное «дыхание»
+        public Transform bob;                    // вертикальное парение
         public readonly List<(Transform t, Vector3 axis, float speed)> spins = new();
         public readonly List<(Transform t, float phase)> wiggles = new();
+        public readonly List<(Material m, Color baseEmission)> pulses = new();   // медленный пульс
+        public readonly List<Material> flickers = new();                          // резкий глитч (баг)
         float _t;
+        Vector3 _bobBase;
+        bool _bobInit;
 
         void Update()
         {
@@ -401,15 +544,32 @@ namespace Virus.Player
                 float k = 1f + Mathf.Sin(_t * 2.2f) * 0.03f;
                 breath.localScale = new Vector3(k, 2f - k, k);
             }
+            if (bob != null)
+            {
+                if (!_bobInit) { _bobBase = bob.localPosition; _bobInit = true; }
+                bob.localPosition = _bobBase + Vector3.up * (Mathf.Sin(_t * 1.7f) * 0.05f);
+            }
             foreach (var (tr, axis, speed) in spins)
                 if (tr != null) tr.Rotate(axis, speed * Time.deltaTime, Space.Self);
             foreach (var (tr, phase) in wiggles)
                 if (tr != null)
                 {
                     var p = tr.localPosition;
-                    p.x = Mathf.Sin(_t * 3.4f + phase) * 0.08f;
+                    p.x += (Mathf.Sin(_t * 3.4f + phase) * 0.08f - p.x) * 0.5f;
                     tr.localPosition = p;
                 }
+            if (pulses.Count > 0)
+            {
+                float pk = 0.75f + 0.25f * Mathf.Sin(_t * 3f);
+                foreach (var (m, baseEm) in pulses)
+                    if (m != null) m.SetColor("_EmissionColor", baseEm * pk);
+            }
+            if (flickers.Count > 0)
+            {
+                float fk = Mathf.PerlinNoise(_t * 14f, 0.3f) > 0.55f ? 1f : 0.25f;
+                foreach (var m in flickers)
+                    if (m != null) m.SetColor("_EmissionColor", new Color(1f, 0.35f, 0.4f) * (2.2f * fk));
+            }
         }
     }
 }
