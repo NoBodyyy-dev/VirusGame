@@ -106,16 +106,17 @@ namespace Virus.World
 
             var sun = new GameObject("Moon").AddComponent<Light>();
             sun.type = LightType.Directional;
-            sun.color = new Color(0.55f, 0.65f, 0.88f);
-            sun.intensity = 0.65f;
+            sun.color = new Color(0.6f, 0.7f, 0.92f);
+            sun.intensity = 1.0f;
             sun.transform.rotation = Quaternion.Euler(55, -35, 0);
             sun.shadows = LightShadows.Soft;
             sun.shadowStrength = 0.75f;
 
+            // ACES-тонмаппинг съедает яркость — амбиент с запасом
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = new Color(0.38f, 0.45f, 0.60f);
-            RenderSettings.ambientEquatorColor = new Color(0.32f, 0.35f, 0.42f);
-            RenderSettings.ambientGroundColor = new Color(0.14f, 0.15f, 0.18f);
+            RenderSettings.ambientSkyColor = new Color(0.55f, 0.63f, 0.82f);
+            RenderSettings.ambientEquatorColor = new Color(0.45f, 0.49f, 0.58f);
+            RenderSettings.ambientGroundColor = new Color(0.2f, 0.21f, 0.25f);
 
             var skyShader = Shader.Find("Skybox/Procedural");
             if (skyShader != null)
@@ -230,7 +231,7 @@ namespace Virus.World
                     4 => new Color(0.55f, 0.7f, 1f),
                     _ => new Color(0.8f, 0.86f, 0.95f),
                 };
-                float energy = r.stage == 0 ? 2.2f : 1.6f;
+                float energy = r.stage == 0 ? 3.0f : 2.3f;
                 int nx = Mathf.Clamp((int)(r.W / 18f), 1, 4), nz = Mathf.Clamp((int)(r.D / 18f), 1, 4);
                 for (int ix = 0; ix < nx; ix++)
                     for (int iz = 0; iz < nz; iz++)

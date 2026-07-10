@@ -130,14 +130,14 @@ namespace Virus.Player
             core.SetParent(t, false);
             core.localPosition = new Vector3(0, 0.95f, 0);
             anim.breath = core;
-            Prim(PrimitiveType.Sphere, core, Vector3.zero, Vector3.one * 0.84f, Mats.Neon(c, 1.1f));
+            Prim(PrimitiveType.Sphere, core, Vector3.zero, Vector3.one * 0.84f, Mats.Neon(c, 0.4f));
             Prim(PrimitiveType.Sphere, core, Vector3.zero, Vector3.one * 0.36f, Mats.Neon(c, 3f));
             var rng = new System.Random(3);
             for (int i = 0; i < 10; i++)
             {
                 var dir = new Vector3((float)rng.NextDouble() * 2 - 1, (float)rng.NextDouble() * 1.6f - 0.6f,
                     (float)rng.NextDouble() * 2 - 1).normalized;
-                Spike(core, Vector3.zero, dir, 0.24f, Mats.Neon(c, 1.8f), Mats.Neon(Color.Lerp(c, Color.white, 0.3f), 2.6f));
+                Spike(core, Vector3.zero, dir, 0.24f, Mats.Neon(c, 1.2f), Mats.Neon(Color.Lerp(c, Color.white, 0.3f), 1.5f));
             }
             Eyes(core, new Vector3(0, 0.1f, -0.36f), 0.08f, c);
             var ring = Ring(core, Vector3.zero, 0.54f, 10, 0.05f, Mats.Neon(c, 1.2f), 70f);
@@ -151,7 +151,7 @@ namespace Virus.Player
             head.SetParent(t, false);
             head.localPosition = new Vector3(0, 0.95f, 0);
             anim.breath = head;
-            Prim(PrimitiveType.Sphere, head, Vector3.zero, Vector3.one * 0.68f, Mats.Neon(c, 1f));
+            Prim(PrimitiveType.Sphere, head, Vector3.zero, Vector3.one * 0.68f, Mats.Neon(c, 0.45f));
             Ring(head, new Vector3(0, 0.05f, 0.05f), 0.32f, 8, 0.05f, Mats.Neon(c, 1.4f), 78f);
             // вращающийся бур
             var drill = new GameObject("drill").transform;
@@ -171,7 +171,7 @@ namespace Virus.Player
                 float r = 0.27f - 0.03f * i;
                 var seg = Prim(PrimitiveType.Sphere, t,
                     new Vector3(0, 0.95f - 0.05f * i, 0.42f + 0.32f * i), Vector3.one * r * 2f,
-                    Mats.Neon(c, Mathf.Max(1.15f - 0.12f * i, 0.3f)));
+                    Mats.Neon(c, Mathf.Max(0.5f - 0.06f * i, 0.15f)));
                 anim.wiggles.Add((seg.transform, i * 0.7f));
             }
         }
@@ -240,7 +240,7 @@ namespace Virus.Player
             eye.SetParent(t, false);
             eye.localPosition = new Vector3(0, 1.05f, 0);
             anim.breath = eye;
-            Prim(PrimitiveType.Sphere, eye, Vector3.zero, Vector3.one * 0.7f, Mats.Neon(c, 0.9f));
+            Prim(PrimitiveType.Sphere, eye, Vector3.zero, Vector3.one * 0.7f, Mats.Neon(c, 0.4f));
             Prim(PrimitiveType.Sphere, eye, new Vector3(0, 0, -0.26f), Vector3.one * 0.34f, Mats.Neon(Color.white, 1.8f));
             Prim(PrimitiveType.Sphere, eye, new Vector3(0, 0, -0.37f), Vector3.one * 0.16f, Mats.Neon(new Color(1f, 0.3f, 0.3f), 4f));
             // антенны-стебельки
@@ -249,7 +249,7 @@ namespace Virus.Player
             {
                 float a = Mathf.PI * 2f * i / stalks;
                 var dir = new Vector3(Mathf.Cos(a), 0.9f, Mathf.Sin(a)).normalized;
-                Spike(eye, Vector3.zero, dir, 0.3f, Mats.Neon(c, 1.6f), Mats.Neon(Color.Lerp(c, Color.white, 0.4f), 3f));
+                Spike(eye, Vector3.zero, dir, 0.3f, Mats.Neon(c, 1.2f), Mats.Neon(Color.Lerp(c, Color.white, 0.4f), 1.6f));
             }
             var ring = Ring(eye, Vector3.zero, 0.52f, 12, 0.035f, Mats.Neon(c, 1.5f), 20f);
             anim.spins.Add((ring, Vector3.up, 80f));
@@ -262,7 +262,7 @@ namespace Virus.Player
             core.SetParent(t, false);
             core.localPosition = new Vector3(0, 0.95f, 0);
             anim.breath = core;
-            Prim(PrimitiveType.Sphere, core, Vector3.zero, Vector3.one * 0.6f, Mats.Neon(c, 1.2f));
+            Prim(PrimitiveType.Sphere, core, Vector3.zero, Vector3.one * 0.6f, Mats.Neon(c, 0.5f));
             Eyes(core, new Vector3(0, 0.08f, -0.26f), 0.07f, c);
             var pivot = new GameObject("popups").transform;
             pivot.SetParent(core, false);
@@ -310,7 +310,7 @@ namespace Virus.Player
             core.SetParent(t, false);
             core.localPosition = new Vector3(0, 0.95f, 0);
             anim.breath = core;
-            Prim(PrimitiveType.Sphere, core, Vector3.zero, Vector3.one * 0.56f, Mats.Neon(c, 1.4f));
+            Prim(PrimitiveType.Sphere, core, Vector3.zero, Vector3.one * 0.56f, Mats.Neon(c, 0.55f));
             Eyes(core, new Vector3(0, 0.06f, -0.24f), 0.06f, c);
             var swarm = new GameObject("swarm").transform;
             swarm.SetParent(core, false);

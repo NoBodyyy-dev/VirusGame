@@ -325,9 +325,10 @@ namespace Virus.World
             var th = _theme;
             QualitySettings.pixelLightCount = 10;
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = th.ambSky;
-            RenderSettings.ambientEquatorColor = th.ambEq;
-            RenderSettings.ambientGroundColor = th.ambGnd;
+            // ACES-тонмаппинг съедает яркость — амбиент даём с запасом
+            RenderSettings.ambientSkyColor = th.ambSky * 1.5f;
+            RenderSettings.ambientEquatorColor = th.ambEq * 1.5f;
+            RenderSettings.ambientGroundColor = th.ambGnd * 1.4f;
             RenderSettings.fog = true;
             RenderSettings.fogColor = th.fogCol;
             RenderSettings.fogMode = FogMode.Exponential;
@@ -337,7 +338,7 @@ namespace Virus.World
             var moon = new GameObject("Fill").AddComponent<Light>();
             moon.type = LightType.Directional;
             moon.color = th.lightCol;
-            moon.intensity = 0.45f;
+            moon.intensity = 0.8f;
             moon.transform.rotation = Quaternion.Euler(58, -28, 0);
             moon.shadows = LightShadows.Soft;
         }

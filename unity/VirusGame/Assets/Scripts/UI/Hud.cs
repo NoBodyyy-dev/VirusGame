@@ -33,7 +33,7 @@ namespace Virus.UI
             _toast     = MakeText(canvasGo.transform, new Vector2(0.5f, 1), TextAnchor.UpperCenter, 24, new Vector2(0, -110));
             _toast.color = new Color(0.16f, 0.95f, 0.75f);
             _abilities = MakeText(canvasGo.transform, new Vector2(0, 0), TextAnchor.LowerLeft, 18, new Vector2(28, 58));
-            _strain    = MakeText(canvasGo.transform, new Vector2(1, 1), TextAnchor.UpperRight, 20, new Vector2(-28, -28));
+            _strain    = MakeText(canvasGo.transform, new Vector2(1, 1), TextAnchor.UpperRight, 20, new Vector2(-28, -56));
         }
 
         static Text MakeText(Transform parent, Vector2 anchor, TextAnchor align, int size, Vector2 offset)

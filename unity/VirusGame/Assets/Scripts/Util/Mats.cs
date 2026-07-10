@@ -116,7 +116,8 @@ namespace Virus.Util
         public static Material Neon(Color c, float energy = 1.8f)
         {
             var m = NewEmissive();
-            SetAlbedo(m, new Color(0.02f, 0.03f, 0.05f));
+            // альбедо слегка тонируем цветом: при слабом эмиссиве тело не сереет
+            SetAlbedo(m, new Color(c.r * 0.35f, c.g * 0.35f, c.b * 0.35f));
             m.SetColor("_EmissionColor", new Color(c.r, c.g, c.b) * energy);
             return m;
         }
