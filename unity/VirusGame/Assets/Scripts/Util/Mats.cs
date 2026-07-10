@@ -8,11 +8,10 @@ namespace Virus.Util
     // «настоящего» триплана нужен Shader Graph (см. PORTING.md).
     public static class Mats
     {
-        // Работает и в URP, и во встроенном конвейере: если URP-ассет не назначен,
-        // Shader.Find("URP/Lit")==null → падаем на встроенный Standard. Имена
-        // свойств у них разные — учитываем через _urp.
+        // Работает и в URP, и во встроенном конвейере. Под URP базовые материалы
+        // берём из Resources (их кладёт editor-скрипт SetupURP — так шейдер
+        // URP/Lit попадает в билд с нужными вариантами); иначе — Standard.
         static Shader _lit;
-        static bool _urp;
         static Shader Lit
         {
             get
@@ -20,11 +19,36 @@ namespace Virus.Util
                 if (_lit == null)
                 {
                     _lit = Shader.Find("Universal Render Pipeline/Lit");
-                    _urp = _lit != null;
                     if (_lit == null) _lit = Shader.Find("Standard");
                 }
                 return _lit;
             }
+        }
+
+        static Material _baseLit, _baseEmis;
+        static bool _basesInit;
+
+        static void InitBases()
+        {
+            if (_basesInit) return;
+            _basesInit = true;
+            _baseLit = Resources.Load<Material>("mat_urp_lit");
+            _baseEmis = Resources.Load<Material>("mat_urp_lit_emissive");
+        }
+
+        static Material NewLit()
+        {
+            InitBases();
+            return _baseLit != null ? new Material(_baseLit) : new Material(Lit);
+        }
+
+        static Material NewEmissive()
+        {
+            InitBases();
+            var m = _baseEmis != null ? new Material(_baseEmis) : new Material(Lit);
+            m.EnableKeyword("_EMISSION");
+            m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
+            return m;
         }
 
         static readonly System.Collections.Generic.Dictionary<string, Texture2D> _texCache = new();
@@ -57,23 +81,30 @@ namespace Virus.Util
             return tex;
         }
 
-        static void SetAlbedo(Material m, Color c) { m.SetColor(_urp ? "_BaseColor" : "_Color", c); }
+        // ставим оба набора имён свойств: лишнее шейдер молча игнорирует
+        static void SetAlbedo(Material m, Color c)
+        {
+            m.SetColor("_BaseColor", c);
+            m.SetColor("_Color", c);
+        }
         static void SetTex(Material m, Texture t, float tile)
         {
-            string p = _urp ? "_BaseMap" : "_MainTex";
-            m.SetTexture(p, t);
-            m.SetTextureScale(p, new Vector2(tile, tile));
+            var scale = new Vector2(tile, tile);
+            m.SetTexture("_BaseMap", t);
+            m.SetTextureScale("_BaseMap", scale);
+            m.SetTexture("_MainTex", t);
+            m.SetTextureScale("_MainTex", scale);
         }
         static void SetSmooth(Material m, float metallic, float smoothness)
         {
             m.SetFloat("_Metallic", metallic);
-            m.SetFloat(_urp ? "_Smoothness" : "_Glossiness", smoothness);
+            m.SetFloat("_Smoothness", smoothness);
+            m.SetFloat("_Glossiness", smoothness);
         }
 
         static Material Base(Color albedo, float metallic, float smoothness, string noiseKey, int seed, float freq, float tile)
         {
-            _ = Lit;                       // инициализировать _urp
-            var m = new Material(Lit);
+            var m = NewLit();
             SetAlbedo(m, albedo);
             SetSmooth(m, metallic, smoothness);
             // у Godot был триплан в мировых координатах; тут UV 0..1 на грань
@@ -84,11 +115,8 @@ namespace Virus.Util
 
         public static Material Neon(Color c, float energy = 1.8f)
         {
-            _ = Lit;
-            var m = new Material(Lit);
+            var m = NewEmissive();
             SetAlbedo(m, new Color(0.02f, 0.03f, 0.05f));
-            m.EnableKeyword("_EMISSION");
-            m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
             m.SetColor("_EmissionColor", new Color(c.r, c.g, c.b) * energy);
             return m;
         }

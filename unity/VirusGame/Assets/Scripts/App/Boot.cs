@@ -7,12 +7,40 @@ namespace Virus.App
 {
     // Бутстрапы сцен (порт _ready корневых нод Godot): каждый строит свою
     // сцену процедурно. GameState — персистентный синглтон.
+    // -shot <префикс>: игра сама сохраняет свои кадры (для автопроверки
+    // рендера без захвата чужого экрана; окно может быть перекрыто).
+    public class AutoShot : MonoBehaviour
+    {
+        public string prefix = "shot";
+        float _t = 6f;   // первый кадр — через 6с (мир успел построиться)
+        int _n;
+
+        void Update()
+        {
+            _t -= Time.deltaTime;
+            if (_t <= 0f && _n < 5)
+            {
+                _t = 6f;
+                ScreenCapture.CaptureScreenshot($"{prefix}_{_n++}.png");
+            }
+        }
+    }
+
     static class BootCommon
     {
         public static void EnsureState()
         {
+            Application.runInBackground = true;   // кооп/автотесты: не замирать без фокуса
             if (GameStateBehaviour.I == null)
                 new GameObject("GameState", typeof(GameStateBehaviour));
+            var args = System.Environment.GetCommandLineArgs();
+            int shotAt = System.Array.IndexOf(args, "-shot");
+            if (shotAt >= 0 && Object.FindFirstObjectByType<AutoShot>() == null)
+            {
+                var shot = new GameObject("AutoShot", typeof(AutoShot)).GetComponent<AutoShot>();
+                shot.prefix = shotAt + 1 < args.Length ? args[shotAt + 1] : "shot";
+                Object.DontDestroyOnLoad(shot.gameObject);
+            }
             // кнопки uGUI (головоломка, результаты, меню) требуют EventSystem
             if (Object.FindFirstObjectByType<UnityEngine.EventSystems.EventSystem>() == null)
                 new GameObject("EventSystem", typeof(UnityEngine.EventSystems.EventSystem),
@@ -95,6 +123,8 @@ namespace Virus.App
             cam.tag = "MainCamera";
             cam.GetComponent<Camera>().clearFlags = CameraClearFlags.SolidColor;
             cam.GetComponent<Camera>().backgroundColor = new Color(0.012f, 0.02f, 0.045f);
+            PostFx.AttachCamera(cam.GetComponent<Camera>());
+            PostFx.EnsureVolume();
 
             var canvasGo = new GameObject("Menu", typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
             canvasGo.GetComponent<Canvas>().renderMode = RenderMode.ScreenSpaceOverlay;

@@ -60,6 +60,8 @@ namespace Virus.Player
             _cam = camGo.transform;
             _cam.SetParent(_pitch, false);
             _cam.localPosition = new Vector3(0, 0, -ArmLen);
+            PostFx.AttachCamera(_camera);
+            PostFx.EnsureVolume();
 
             RebuildModel();
             Cursor.lockState = CursorLockMode.Locked;

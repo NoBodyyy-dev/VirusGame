@@ -181,6 +181,11 @@ namespace UnityEngine
 
     public class Behaviour : Component { public bool enabled = true; }
 
+    public class ScriptableObject : Object
+    {
+        public static T CreateInstance<T>() where T : ScriptableObject => Activator.CreateInstance<T>();
+    }
+
     public class MonoBehaviour : Behaviour
     {
         public Coroutine StartCoroutine(IEnumerator routine) => null;
@@ -310,7 +315,62 @@ namespace UnityEngine
         public static Material skybox;
         public static Rendering.AmbientMode ambientMode;
     }
-    namespace Rendering { public enum AmbientMode { Skybox, Trilight, Flat, Custom } }
+    namespace Rendering
+    {
+        public enum AmbientMode { Skybox, Trilight, Flat, Custom }
+
+        public static class GraphicsSettings { public static object currentRenderPipeline => null; }
+
+        public class VolumeComponent : ScriptableObject { }
+
+        public class VolumeProfile : ScriptableObject
+        {
+            public T Add<T>(bool overrides = false) where T : VolumeComponent, new() => new T();
+        }
+
+        public class Volume : MonoBehaviour
+        {
+            public bool isGlobal;
+            public VolumeProfile profile;
+        }
+    }
+
+    namespace Rendering.Universal
+    {
+        public enum AntialiasingMode { None, FastApproximateAntialiasing, SubpixelMorphologicalAntiAliasing }
+        public enum TonemappingMode { None, Neutral, ACES }
+
+        public class FloatParam { public float value; }
+        public class ToneParam { public TonemappingMode value; }
+
+        public class Bloom : Rendering.VolumeComponent
+        {
+            public FloatParam intensity = new(), threshold = new(), scatter = new();
+        }
+        public class Vignette : Rendering.VolumeComponent
+        {
+            public FloatParam intensity = new(), smoothness = new();
+        }
+        public class ColorAdjustments : Rendering.VolumeComponent
+        {
+            public FloatParam postExposure = new(), saturation = new(), contrast = new();
+        }
+        public class Tonemapping : Rendering.VolumeComponent
+        {
+            public ToneParam mode = new();
+        }
+
+        public class UniversalAdditionalCameraData : MonoBehaviour
+        {
+            public bool renderPostProcessing;
+            public AntialiasingMode antialiasing;
+        }
+
+        public static class CameraExtensions
+        {
+            public static UniversalAdditionalCameraData GetUniversalAdditionalCameraData(this Camera cam) => new();
+        }
+    }
 
     public static class QualitySettings
     {
@@ -346,7 +406,21 @@ namespace UnityEngine
         public static bool visible;
     }
 
-    public static class Application { public static void Quit() { } }
+    public static class Application
+    {
+        public static bool runInBackground;
+        public static void Quit() { }
+    }
+
+    public static class ScreenCapture
+    {
+        public static void CaptureScreenshot(string filename) { }
+    }
+
+    public static class Resources
+    {
+        public static T Load<T>(string path) where T : Object => null;
+    }
 
     public static class Random
     {

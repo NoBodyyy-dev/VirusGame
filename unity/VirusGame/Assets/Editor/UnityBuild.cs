@@ -2,6 +2,8 @@ using System.IO;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 
 namespace Virus.EditorTools
@@ -96,9 +98,57 @@ namespace Virus.EditorTools
             if (changed) { so.ApplyModifiedProperties(); Debug.Log($"[VirusBuild] -always-included '{shaderName}'/null"); }
         }
 
+        // ── URP: пайплайн-ассет (Forward+), HDR, базовые материалы в Resources.
+        // Материалы-ассеты тянут в билд шейдер URP/Lit ровно с нужными
+        // вариантами (always-included для URP/Lit взорвал бы время сборки).
+        [MenuItem("Virus/Setup URP")]
+        public static void SetupURP()
+        {
+            Directory.CreateDirectory("Assets/Settings");
+            Directory.CreateDirectory("Assets/Resources");
+
+            var rendererData = AssetDatabase.LoadAssetAtPath<UniversalRendererData>("Assets/Settings/URPRenderer.asset");
+            if (rendererData == null)
+            {
+                rendererData = ScriptableObject.CreateInstance<UniversalRendererData>();
+                rendererData.renderingMode = RenderingMode.ForwardPlus;   // много точечных огней
+                AssetDatabase.CreateAsset(rendererData, "Assets/Settings/URPRenderer.asset");
+            }
+            var rp = AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>("Assets/Settings/URPAsset.asset");
+            if (rp == null)
+            {
+                rp = UniversalRenderPipelineAsset.Create(rendererData);
+                AssetDatabase.CreateAsset(rp, "Assets/Settings/URPAsset.asset");
+            }
+            rp.supportsHDR = true;
+            rp.msaaSampleCount = 4;
+            rp.shadowDistance = 70f;
+            GraphicsSettings.defaultRenderPipeline = rp;
+            QualitySettings.renderPipeline = rp;
+
+            var lit = Shader.Find("Universal Render Pipeline/Lit");
+            if (lit != null)
+            {
+                if (AssetDatabase.LoadAssetAtPath<Material>("Assets/Resources/mat_urp_lit.mat") == null)
+                    AssetDatabase.CreateAsset(new Material(lit), "Assets/Resources/mat_urp_lit.mat");
+                if (AssetDatabase.LoadAssetAtPath<Material>("Assets/Resources/mat_urp_lit_emissive.mat") == null)
+                {
+                    var em = new Material(lit);
+                    em.EnableKeyword("_EMISSION");
+                    em.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
+                    em.SetColor("_EmissionColor", Color.white);
+                    AssetDatabase.CreateAsset(em, "Assets/Resources/mat_urp_lit_emissive.mat");
+                }
+            }
+            AssetDatabase.SaveAssets();
+            Debug.Log("[VirusBuild] URP configured (Forward+, HDR, base mats)");
+        }
+
         [MenuItem("Virus/Build Windows")]
         public static void BuildWindows()
         {
+            PlayerSettings.runInBackground = true;   // кооп двумя окнами + автопроверки
+            SetupURP();
             // Форсим только Standard (обычный шейдер, иначе вырезается).
             // Шрифтовые/UI-шейдеры (GUI/Text Shader, UI/Default) — встроенные
             // DontSave-ресурсы, Unity кладёт их в билд сам; форсить их нельзя.
