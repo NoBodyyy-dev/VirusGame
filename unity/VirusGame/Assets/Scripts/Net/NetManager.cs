@@ -9,11 +9,12 @@ using Virus.Util;
 
 namespace Virus.Net
 {
-    // Кооп по LAN (редизайн net.gd): хост владеет кампанией, клиенты получают
+    // Кооп (редизайн net.gd): хост владеет кампанией, клиенты получают
     // снапшот и живые события (флаги, захваты узлов), все обмениваются позицией
-    // и идентичностью штамма. Транспорт — TCP: поток чтения на пира, строки
-    // режет Core.NetFramer, применение к состоянию — Core.NetSync (main thread).
-    public class NetManager : MonoBehaviour
+    // и идентичностью штамма. Транспорт — TCP (LAN) или Steam P2P (партиал
+    // SteamNet.cs, компилируется при STEAMWORKS_NET): строки режет Core.NetFramer,
+    // применение к состоянию — Core.NetSync (main thread).
+    public partial class NetManager : MonoBehaviour
     {
         public static NetManager I { get; private set; }
         public static bool Active => I != null && (I._isHost || I._joined);
@@ -23,9 +24,13 @@ namespace Virus.Net
             public int id;
             public TcpClient tcp;
             public NetworkStream stream;
+            public ulong steam;                    // ≠0 — пир за Steam P2P, не TCP
             public readonly NetFramer framer = new();
             public volatile bool alive = true;
         }
+
+        // срез напарника для игровой логики (роботы целятся во всю стаю)
+        public struct PeerInfo { public int id; public Vector3 pos; public int stage; }
 
         class Avatar
         {
@@ -60,11 +65,43 @@ namespace Virus.Net
         public static void StartHost() => Ensure().HostGame();
         public static void StartClient(string ip) => Ensure().JoinGame(ip);
 
+        // ── Steam: реализация в партиале SteamNet.cs; без пакета кнопки скрыты ──
+        static bool _steamReady;
+        public static bool SteamReady { get { Ensure(); return _steamReady; } }
+        public static void StartSteamHost() { Ensure().HostGame(); Ensure().SteamHostImpl(); }
+        public static void JoinSteamLobby() => Ensure().SteamJoinImpl();
+
+        partial void SteamInitImpl();
+        partial void SteamHostImpl();
+        partial void SteamJoinImpl();
+        partial void SteamPollImpl();
+        partial void SteamSendImpl(ulong steamId, byte[] data);
+        partial void SteamShutdownImpl();
+
+        // ── доступ для игровой логики (Level): рассылка и напарники сцены ──
+        public static int MyId => I != null ? I.myId : 1;
+
+        public static void Send(string msg) { if (Active) I.Broadcast(msg); }
+
+        /// Напарники, находящиеся в той же сцене (тот же токен "raid:<id>"/"grid").
+        public static void PeersIn(string scene, List<PeerInfo> result)
+        {
+            result.Clear();
+            if (!Active) return;
+            foreach (var a in I._avatars.Values)
+            {
+                if (a.id == I.myId || a.scene != scene) continue;
+                var pos = a.go != null ? a.go.transform.position : a.target;
+                result.Add(new PeerInfo { id = a.id, pos = pos, stage = a.stage });
+            }
+        }
+
         void Awake()
         {
             if (I != null && I != this) { Destroy(gameObject); return; }
             I = this;
             DontDestroyOnLoad(gameObject);
+            SteamInitImpl();
             _myName = "ШТАММ-" + new System.Random().Next(100, 999);
             GameState.I.SendFlag += key => Broadcast(NetSync.MsgFlag(key));
             GameState.I.SendNodeInfected += id => Broadcast(NetSync.MsgNode(id));
@@ -139,10 +176,12 @@ namespace Virus.Net
         // ── отправка (из главного потока) ──
         void SendTo(Peer peer, string msg)
         {
-            if (peer?.stream == null || !peer.alive) return;
+            if (peer == null || !peer.alive) return;
+            var data = NetFramer.Pack(msg);
+            if (peer.steam != 0) { SteamSendImpl(peer.steam, data); return; }
+            if (peer.stream == null) return;
             try
             {
-                var data = NetFramer.Pack(msg);
                 lock (peer) peer.stream.Write(data, 0, data.Length);
             }
             catch { peer.alive = false; }
@@ -163,6 +202,7 @@ namespace Virus.Net
         // ── главный поток: применение входящих и рассылка позиции ──
         void Update()
         {
+            SteamPollImpl();   // Steam P2P читается в главном потоке
             while (_inbox.TryDequeue(out var item)) Handle(item.from, item.line);
 
             if (!Active) return;
@@ -277,6 +317,14 @@ namespace Virus.Net
                     if (p.Length >= 2 && int.TryParse(p[1], out var bid)) RemoveAvatar(bid);
                     if (_isHost) Broadcast(line, from);
                     break;
+                default:
+                    // рейд-кооп (R…): ретранслируем всем и отдаём рейду, если мы в этой сцене
+                    if (p[0].Length >= 3 && p[0][0] == 'R' && p.Length >= 2)
+                    {
+                        if (_isHost) Broadcast(line, from);
+                        if (p[1] == SceneToken()) World.Level.Current?.HandleNet(p);
+                    }
+                    break;
             }
         }
 
@@ -351,6 +399,7 @@ namespace Virus.Net
         {
             _isHost = false;
             _joined = false;
+            SteamShutdownImpl();
             try { _listener?.Stop(); } catch { }
             lock (_peers)
             {

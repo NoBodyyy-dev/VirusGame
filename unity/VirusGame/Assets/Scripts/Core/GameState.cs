@@ -274,12 +274,27 @@ namespace Virus.Core
             EvolutionChanged?.Invoke();
         }
 
+        // сид кампании определяет сиды узлов (арены рейдов); в коопе клиент
+        // получает сид хоста в снапшоте — иначе арены одного узла разойдутся
+        public int campaignSeed;
+
+        /// Перезасев узлов по чужому сиду БЕЗ пересоздания списка: ссылки на
+        /// ServerNode, которые уже держит сцена Грида, остаются живыми.
+        public void ReseedCampaign(int seed)
+        {
+            if (seed == campaignSeed) return;
+            campaignSeed = seed;
+            var rng = new System.Random(seed);
+            foreach (var n in gridNodes) n.seed = rng.Next();
+        }
+
         void GenerateGrid()
         {
             gridNodes.Clear();
             zoneCounts.Clear();
             var counts = new[] { 0, 0, 0, 0 };
-            var rng = new System.Random();
+            campaignSeed = System.Environment.TickCount;
+            var rng = new System.Random(campaignSeed);
             int id = 0;
             foreach (var s in GameData.SERVERS)
             {

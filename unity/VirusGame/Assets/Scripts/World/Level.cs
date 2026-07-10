@@ -25,7 +25,14 @@ namespace Virus.World
         System.Random _rng;
         float _hallW, _hallD;
 
-        class Loot { public Transform body; public Rigidbody rb; public float value; public int weight; public bool carried, deposited; public TextMesh label; public GameObject beacon; }
+        class Loot
+        {
+            public Transform body; public Rigidbody rb; public float value; public int weight;
+            public bool carried, deposited; public TextMesh label; public GameObject beacon;
+            public int carrier;          // кооп: id носильщика (0 — свободен)
+            public Vector3 netPos;       // кооп: позиция от чужого носильщика
+            public bool hasNet;
+        }
         readonly List<Loot> _loot = new();
         Loot _carried;
 
@@ -39,11 +46,26 @@ namespace Virus.World
             public Vector3 home, lastPos;
             public float meleeCd, hookCd, stunUntil;
             public bool hookOut;
+            public Vector3 netPos;       // кооп-реплика: цель от директора
+            public float netRy;
+            public bool hasNet;
         }
         readonly List<Guard> _guards = new();
 
-        class Hook { public Transform t; public Guard owner; public Vector3 dir; public bool ret; public bool caught; }
+        class Hook { public Transform t; public Guard owner; public Vector3 dir; public bool ret; public bool caught; public Vector3 netPos; }
         readonly List<Hook> _hooks = new();
+
+        // ── кооп: директор рейда (наименьший id в узле) владеет системой ──
+        // Директор симулирует тревогу/роботов/крюки и рассылает их; остальные
+        // видят реплики и засчитывают урон по себе сами. Ловушки — личные.
+        public static Level Current { get; private set; }
+        string _netScene = "";
+        bool _coop;
+        bool _director = true;
+        readonly List<Net.NetManager.PeerInfo> _peers = new();
+        readonly Dictionary<int, Hook> _hookReplicas = new();   // индекс робота → реплика крюка
+        float _coopTimer, _netPosTimer, _netStateTimer, _lootPosTimer;
+        bool _helperActive;
 
         // статусы системы/активок (метки Time.time)
         float _frozenUntil, _decoyUntil, _cloakUntil, _markedUntil, _hookedUntil, _abilityCd;
@@ -128,6 +150,8 @@ namespace Virus.World
                 if (S.gridNodes.Count == 0) S.NewCampaign();
                 S.StartHack(S.gridNodes[0]);
             }
+            Current = this;
+            _netScene = "raid:" + (S.currentNode?.id ?? -1);
             _rng = new System.Random(S.raid.seed);
             _hallW = 70f + (float)_rng.NextDouble() * 18f;
             _hallD = 46f + (float)_rng.NextDouble() * 14f;
@@ -497,11 +521,32 @@ namespace Virus.World
                 var it = go.AddComponent<Interactable>();
                 it.radius = 2.7f;
                 it.dynamicPrompt = () => _carried == null
-                    ? $"[E] схватить лут (◈ {(int)value})"
+                    ? (loot.carrier != 0 ? "лут у напарника" : $"[E] схватить лут (◈ {(int)value})")
                     : "[E] положить · [F] швырнуть";
-                it.enabledFn = () => !loot.deposited && (_carried == null || _carried == loot);
+                it.enabledFn = () => !loot.deposited &&
+                    (_carried == loot || (_carried == null && loot.carrier == 0));
                 it.onInteract = () => ToggleCarry(loot);
             }
+        }
+
+        // ransomware тащит тяжёлое как лёгкое; червь страдает от груза меньше;
+        // второй носильщик рядом (кооп) заметно ускоряет тяжёлый груз
+        float CarryFactorFor(Loot loot, bool helper)
+        {
+            float heavy = S.HasPassive("ransomware") ? 0.72f : 0.38f;
+            float light = 0.78f;
+            float k = loot.weight >= 2 ? heavy : light;
+            if (S.HasPassive("worm")) k = Mathf.Min(k + 0.12f, 0.95f);
+            if (helper && loot.weight >= 2) k = Mathf.Min(k * 1.6f, 0.92f);
+            return k;
+        }
+
+        bool HelperNear()
+        {
+            if (!_coop) return false;
+            foreach (var pr in _peers)
+                if (Vector3.Distance(pr.pos, _player.transform.position) < 4f) return true;
+            return false;
         }
 
         void ToggleCarry(Loot loot)
@@ -509,30 +554,35 @@ namespace Virus.World
             if (S.myBug) return;
             if (_carried == loot) { DropLoot(); return; }
             if (_carried != null) return;
+            if (loot.carrier != 0 && loot.carrier != Net.NetManager.MyId) return;   // несёт напарник
             _carried = loot;
             loot.carried = true;
+            loot.carrier = Net.NetManager.MyId;
+            loot.hasNet = false;
             loot.rb.isKinematic = true;
             _player.carrying = true;
-            // ransomware тащит тяжёлое как лёгкое; червь страдает от груза меньше
-            float heavy = S.HasPassive("ransomware") ? 0.72f : 0.38f;
-            float light = 0.78f;
-            float k = loot.weight >= 2 ? heavy : light;
-            if (S.HasPassive("worm")) k = Mathf.Min(k + 0.12f, 0.95f);
-            _player.carryFactor = k;
+            _player.carryFactor = CarryFactorFor(loot, HelperNear());
             _player.SetMorph(false);
+            if (_coop)
+                Net.NetManager.Send(NetSync.MsgLootCarry(_netScene, _loot.IndexOf(loot), Net.NetManager.MyId));
         }
 
         void DropLoot()
         {
             if (_carried == null) return;
-            _carried.carried = false;
-            _carried.rb.isKinematic = false;
+            var l = _carried;
+            l.carried = false;
+            l.carrier = 0;
+            l.rb.isKinematic = false;
             _carried = null;
+            _helperActive = false;
             if (_player != null)
             {
                 _player.carrying = false;
                 _player.carryFactor = 1f;
             }
+            if (_coop)
+                Net.NetManager.Send(NetSync.MsgLootCarry(_netScene, _loot.IndexOf(l), 0));
         }
 
         void SpawnGuards()
@@ -604,7 +654,7 @@ namespace Virus.World
 
         void TaskDone(string msg)
         {
-            S.ApplyAlarm(-8f);
+            AlarmEvent(-8f);
             S.CareerEvent("tasks");
             Sfx.Play("win", 0.3f);
             _hud?.Toast(msg + " · тревога −8, карьера +1 задача");
@@ -762,6 +812,11 @@ namespace Virus.World
             return _player.transform.position + Vector3.up * 1.1f;
         }
 
+        void OnDestroy()
+        {
+            if (Current == this) Current = null;
+        }
+
         void Update()
         {
             if (_done || _player == null) return;
@@ -769,14 +824,23 @@ namespace Virus.World
             _hitLock = Mathf.Max(_hitLock - dt, 0f);
             _abilityCd = Mathf.Max(_abilityCd - dt, 0f);
 
-            // тревога ползёт сама; на эвакуации — быстрее
-            S.ApplyAlarm(S.raid.creep * (S.evacOpen ? 1.6f : 1f) * dt);
+            TickCoop(dt);
+            // тревога ползёт сама (у не-директора её ведёт директор через RAS)
+            if (_director) S.ApplyAlarm(S.raid.creep * (S.evacOpen ? 1.6f : 1f) * dt);
             TickPhaseFx();
             if (!Frozen)
             {
                 TickTraps(dt);
-                TickGuards(dt);
-                TickHooks(dt);
+                if (_director)
+                {
+                    TickGuards(dt);
+                    TickHooks(dt);
+                }
+            }
+            if (!_director)
+            {
+                TickGuardReplicas(dt);
+                TickHookReplicas(dt);
             }
             TickHooked(dt);
             TickAbilities();
@@ -798,7 +862,14 @@ namespace Virus.World
             if (UI.PuzzleUI.IsOpen || UI.EvolutionUI.IsOpen) return;
             var l = _carried;
             DropLoot();
-            l.rb.linearVelocity = _player.LookDir() * 10f + Vector3.up * 4.5f;
+            var v = _player.LookDir() * 10f + Vector3.up * 4.5f;
+            l.rb.linearVelocity = v;
+            if (_coop)
+            {
+                var p = l.body.position;
+                Net.NetManager.Send(NetSync.MsgLootThrow(_netScene, _loot.IndexOf(l),
+                    p.x, p.y, p.z, v.x, v.y, v.z));
+            }
             Sfx.Play("ui", 0.3f);
         }
 
@@ -965,11 +1036,30 @@ namespace Virus.World
             Destroy(dome, dur);
         }
 
+        // цель робота среди всей стаи: на охоте — сильнейший штамм, иначе ближайший
+        bool GuardTarget(Guard g, bool hunt, out Vector3 pos, out bool isSelf)
+        {
+            pos = default; isSelf = false;
+            bool found = false;
+            float best = float.MinValue;
+            if (!S.myBug && !PlayerHidden)
+            {
+                var pp = _player.transform.position;
+                best = (hunt ? S.EvolveStage() * 1000f : 0f) - Vector3.Distance(g.t.position, pp);
+                pos = pp; isSelf = true; found = true;
+            }
+            foreach (var pr in _peers)
+            {
+                float key = (hunt ? pr.stage * 1000f : 0f) - Vector3.Distance(g.t.position, pr.pos);
+                if (!found || key > best) { best = key; pos = pr.pos; isSelf = false; found = true; }
+            }
+            return found;
+        }
+
         // ── роботы: угол → крюки (50%) → погоня (100%) ──
         void TickGuards(float dt)
         {
             bool hunt = S.AlarmPhase() >= 3;
-            bool seen = !S.myBug && !PlayerHidden;
             foreach (var g in _guards)
             {
                 g.meleeCd = Mathf.Max(g.meleeCd - dt, 0f);
@@ -981,18 +1071,19 @@ namespace Virus.World
                 if (Time.time >= g.stunUntil && g.radar != null) g.radar.Rotate(0f, 140f * dt, 0f, Space.Self);
                 if (Time.time < g.stunUntil || g.hookOut) continue;   // ЭМИ или крюк в полёте — робот замер
 
-                var pp = _player.transform.position;
-                float dist = Vector3.Distance(g.t.position, pp);
+                bool seen = GuardTarget(g, hunt, out var tp, out bool isSelf);
+                float dist = seen ? Vector3.Distance(g.t.position, tp) : 999f;
 
                 if (hunt && seen)
                 {
-                    var dir = pp - g.t.position; dir.y = 0;
+                    var dir = tp - g.t.position; dir.y = 0;
                     if (dir.magnitude > 1.6f)
                     {
                         g.t.position += dir.normalized * (6f * dt);
                         g.t.rotation = Quaternion.Slerp(g.t.rotation, Quaternion.LookRotation(dir), 8f * dt);
                     }
-                    else if (g.meleeCd <= 0f) { g.meleeCd = 1.4f; HurtPlayer(g.t.position, 1); }
+                    // melee по себе; урон напарникам засчитывают их клиенты
+                    else if (isSelf && g.meleeCd <= 0f) { g.meleeCd = 1.4f; HurtPlayer(g.t.position, 1); }
                 }
                 else
                 {
@@ -1000,7 +1091,7 @@ namespace Virus.World
                     if (back.magnitude > 1f) g.t.position += back.normalized * (3.5f * dt);
                     else if (seen && dist < S.raid.camRange * 1.4f)
                     {
-                        var face = pp - g.t.position; face.y = 0;
+                        var face = tp - g.t.position; face.y = 0;
                         if (face.sqrMagnitude > 0.1f)
                             g.t.rotation = Quaternion.Slerp(g.t.rotation, Quaternion.LookRotation(face), 4f * dt);
                     }
@@ -1015,7 +1106,7 @@ namespace Virus.World
                     g.hookCd = (float)_rng.NextDouble() * 4f + 5f;
                     g.hookOut = true;
                     var origin = g.t.position + Vector3.up * 1.9f;
-                    var hdir = (pp + Vector3.up * 1f - origin).normalized;
+                    var hdir = (tp + Vector3.up * 1f - origin).normalized;
                     var body = Build.MeshBox(transform, new Vector3(0.3f, 0.3f, 0.6f), Mats.Neon(new Color(1f, 0.5f, 0.2f), 3f), origin);
                     Build.Omni(body.transform, Vector3.zero, new Color(1f, 0.5f, 0.2f), 1f, 4f);
                     body.transform.rotation = Quaternion.LookRotation(hdir);
@@ -1026,12 +1117,20 @@ namespace Virus.World
             }
         }
 
+        // директор сообщает репликам, что крюк смотан
+        void NetHookEnd(Guard owner)
+        {
+            if (!_coop || !_director) return;
+            int gi = _guards.IndexOf(owner);
+            if (gi >= 0) Net.NetManager.Send(NetSync.MsgHookEnd(_netScene, gi));
+        }
+
         void TickHooks(float dt)
         {
             for (int i = _hooks.Count - 1; i >= 0; i--)
             {
                 var h = _hooks[i];
-                if (h.t == null) { h.owner.hookOut = false; _hooks.RemoveAt(i); continue; }
+                if (h.t == null) { h.owner.hookOut = false; NetHookEnd(h.owner); _hooks.RemoveAt(i); continue; }
                 var robotPos = h.owner.t.position + Vector3.up * 1.9f;
                 float hx = _hallW * 0.5f, hz = _hallD * 0.5f;
 
@@ -1050,6 +1149,7 @@ namespace Virus.World
                     if (back.magnitude < 1.2f)
                     {
                         h.owner.hookOut = false;
+                        NetHookEnd(h.owner);
                         Destroy(h.t.gameObject);
                         _hooks.RemoveAt(i);
                         continue;
@@ -1081,6 +1181,323 @@ namespace Virus.World
             pull.y = 0f;
             if (pull.magnitude < 2f) { _hookedUntil = 0f; return; }
             _player.Teleport(_player.transform.position + pull.normalized * (13f * dt));
+        }
+
+        // ── кооп: выборы директора, рассылка состояния, реплики ──
+        void TickCoop(float dt)
+        {
+            if (Net.NetManager.Active) Net.NetManager.PeersIn(_netScene, _peers);
+            else _peers.Clear();
+
+            _coopTimer -= dt;
+            if (_coopTimer <= 0f)
+            {
+                _coopTimer = 0.5f;
+                _coop = Net.NetManager.Active && _peers.Count > 0;
+                bool was = _director;
+                _director = true;
+                foreach (var pr in _peers)
+                    if (pr.id < Net.NetManager.MyId) { _director = false; break; }
+                if (_director && !was) OnBecameDirector();
+
+                // носильщик пропал (дисконнект/ушёл из узла) — освобождаем груз
+                foreach (var l in _loot)
+                {
+                    if (l.carrier == 0 || l.carrier == Net.NetManager.MyId || l.deposited) continue;
+                    bool present = false;
+                    foreach (var pr in _peers) if (pr.id == l.carrier) { present = true; break; }
+                    if (!present)
+                    {
+                        l.carrier = 0; l.carried = false; l.hasNet = false;
+                        if (l.rb != null) l.rb.isKinematic = false;
+                    }
+                }
+            }
+            if (!_coop) return;
+
+            if (_director)
+            {
+                _netPosTimer -= dt;
+                if (_netPosTimer <= 0f)
+                {
+                    _netPosTimer = 0.12f;
+                    for (int i = 0; i < _guards.Count; i++)
+                    {
+                        var g = _guards[i];
+                        Net.NetManager.Send(NetSync.MsgGuardPos(_netScene, i,
+                            g.t.position.x, g.t.position.z, g.t.eulerAngles.y));
+                    }
+                    foreach (var h in _hooks)
+                    {
+                        if (h.t == null) continue;
+                        int gi = _guards.IndexOf(h.owner);
+                        if (gi >= 0)
+                            Net.NetManager.Send(NetSync.MsgHookPos(_netScene, gi,
+                                h.t.position.x, h.t.position.y, h.t.position.z));
+                    }
+                }
+                _netStateTimer -= dt;
+                if (_netStateTimer <= 0f)
+                {
+                    _netStateTimer = 0.5f;
+                    Net.NetManager.Send(NetSync.MsgRaidState(_netScene, S.alarm, S.evacOpen,
+                        S.evacLeft, S.wipeForced, DepositedMask(), S.access));
+                }
+            }
+
+            // моя ноша: позиция груза для остальных (8 Гц)
+            if (_carried != null)
+            {
+                _lootPosTimer -= dt;
+                if (_lootPosTimer <= 0f)
+                {
+                    _lootPosTimer = 0.12f;
+                    int idx = _loot.IndexOf(_carried);
+                    var p = _carried.body.position;
+                    Net.NetManager.Send(NetSync.MsgLootPos(_netScene, idx, p.x, p.y, p.z));
+                }
+            }
+
+            // лут в руках напарников следует их позициям
+            foreach (var l in _loot)
+                if (l.carrier != 0 && l.carrier != Net.NetManager.MyId && l.hasNet
+                    && l.body != null && !l.deposited)
+                    l.body.position = Vector3.Lerp(l.body.position, l.netPos, Mathf.Min(12f * dt, 1f));
+        }
+
+        // директор ушёл — реплики становятся моей симуляцией
+        void OnBecameDirector()
+        {
+            foreach (var kv in _hookReplicas)
+                if (kv.Value.t != null) Destroy(kv.Value.t.gameObject);
+            _hookReplicas.Clear();
+            foreach (var g in _guards) { g.hasNet = false; g.hookOut = false; }
+        }
+
+        int DepositedMask()
+        {
+            int m = 0;
+            for (int i = 0; i < _loot.Count && i < 31; i++)
+                if (_loot[i].deposited) m |= 1 << i;
+            return m;
+        }
+
+        // событийная тревога: не-директор дублирует поправку директору
+        void AlarmEvent(float delta)
+        {
+            S.ApplyAlarm(delta);
+            if (_coop && !_director)
+                Net.NetManager.Send(NetSync.MsgAlarmDelta(_netScene, delta));
+        }
+
+        /// Входящие рейд-сообщения (маршрутизирует NetManager по токену сцены).
+        public void HandleNet(string[] p)
+        {
+            if (_done || _player == null || p.Length < 3) return;
+            switch (p[0])
+            {
+                case "RAS":
+                    ApplyRaidState(p);
+                    break;
+                case "RALD":
+                    if (_director && NetSync.ParseF(p[2], out var d)) S.ApplyAlarm(d);
+                    break;
+                case "RGP":
+                    if (!_director && p.Length >= 6 && int.TryParse(p[2], out var gi)
+                        && gi >= 0 && gi < _guards.Count
+                        && NetSync.ParseF(p[3], out var gx) && NetSync.ParseF(p[4], out var gz)
+                        && NetSync.ParseF(p[5], out var gry))
+                    {
+                        var g = _guards[gi];
+                        g.netPos = new Vector3(gx, 0f, gz);
+                        g.netRy = gry;
+                        g.hasNet = true;
+                    }
+                    break;
+                case "RSTN":
+                    if (_director && int.TryParse(p[2], out var si) && si >= 0 && si < _guards.Count)
+                        _guards[si].stunUntil = Time.time + 4f;
+                    break;
+                case "RHP":
+                    if (!_director && p.Length >= 6 && int.TryParse(p[2], out var hi)
+                        && hi >= 0 && hi < _guards.Count
+                        && NetSync.ParseF(p[3], out var hx2) && NetSync.ParseF(p[4], out var hy2)
+                        && NetSync.ParseF(p[5], out var hz2))
+                    {
+                        var pos = new Vector3(hx2, hy2, hz2);
+                        if (!_hookReplicas.TryGetValue(hi, out var hr))
+                        {
+                            var hookCol = new Color(1f, 0.5f, 0.2f);
+                            var body = Build.MeshBox(transform, new Vector3(0.3f, 0.3f, 0.6f), Mats.Neon(hookCol, 3f), pos);
+                            Build.Omni(body.transform, Vector3.zero, hookCol, 1f, 4f);
+                            hr = new Hook { t = body.transform, owner = _guards[hi] };
+                            _hookReplicas[hi] = hr;
+                            Sfx.Play("hook", 0.4f);
+                        }
+                        hr.netPos = pos;
+                    }
+                    break;
+                case "RHE":
+                    if (int.TryParse(p[2], out var he) && _hookReplicas.TryGetValue(he, out var her))
+                    {
+                        if (her.t != null) Destroy(her.t.gameObject);
+                        _hookReplicas.Remove(he);
+                    }
+                    break;
+                case "RHC":   // напарника зацепило моим крюком — сматываем
+                    if (_director && int.TryParse(p[2], out var hc) && hc >= 0 && hc < _guards.Count)
+                        foreach (var h in _hooks)
+                            if (h.owner == _guards[hc]) { h.caught = true; h.ret = true; }
+                    break;
+                case "RLC":
+                    if (p.Length >= 4 && int.TryParse(p[2], out var ci) && ci >= 0 && ci < _loot.Count
+                        && int.TryParse(p[3], out var pid))
+                        ApplyLootCarry(_loot[ci], pid);
+                    break;
+                case "RLP":
+                    if (p.Length >= 6 && int.TryParse(p[2], out var li) && li >= 0 && li < _loot.Count
+                        && NetSync.ParseF(p[3], out var lx) && NetSync.ParseF(p[4], out var ly)
+                        && NetSync.ParseF(p[5], out var lz))
+                    {
+                        var l = _loot[li];
+                        if (_carried != l && !l.deposited)
+                        {
+                            l.netPos = new Vector3(lx, ly, lz);
+                            l.hasNet = true;
+                            if (l.carrier == 0) { l.carried = true; if (l.rb != null) l.rb.isKinematic = true; }
+                        }
+                    }
+                    break;
+                case "RLT":
+                    if (p.Length >= 9 && int.TryParse(p[2], out var ti) && ti >= 0 && ti < _loot.Count
+                        && NetSync.ParseF(p[3], out var tx) && NetSync.ParseF(p[4], out var ty)
+                        && NetSync.ParseF(p[5], out var tz) && NetSync.ParseF(p[6], out var tvx)
+                        && NetSync.ParseF(p[7], out var tvy) && NetSync.ParseF(p[8], out var tvz))
+                    {
+                        var l = _loot[ti];
+                        l.carrier = 0; l.carried = false; l.hasNet = false;
+                        if (l.body != null && l.rb != null && !l.deposited)
+                        {
+                            l.rb.isKinematic = false;
+                            l.body.position = new Vector3(tx, ty, tz);
+                            l.rb.linearVelocity = new Vector3(tvx, tvy, tvz);
+                        }
+                    }
+                    break;
+                case "RLD":
+                    if (p.Length >= 4 && int.TryParse(p[2], out var di) && di >= 0 && di < _loot.Count)
+                    {
+                        MarkDepositedRemote(_loot[di]);
+                        if (NetSync.ParseF(p[3], out var acc)) S.access = Mathf.Max(S.access, acc);
+                        Sfx.Play("deposit", 0.3f);
+                        _hud?.Toast($"Напарник внёс лут! Добыча {(int)S.access}%");
+                        if (!S.evacOpen && S.access >= 100f) OpenEvac(false);
+                    }
+                    break;
+            }
+        }
+
+        void ApplyRaidState(string[] p)
+        {
+            if (_director || p.Length < 8) return;
+            if (NetSync.ParseF(p[2], out var alarm)) S.alarm = alarm;
+            bool evac = p[3] == "1";
+            NetSync.ParseF(p[4], out var evacLeft);
+            bool wipe = p[5] == "1";
+            if (evac && !S.evacOpen)
+            {
+                S.evacOpen = true;
+                S.wipeForced = wipe;
+                S.evacLeft = evacLeft;
+                _hud?.Toast(wipe ? $"СТИРАНИЕ УЗЛА: {(int)evacLeft}с — В КРУГ!"
+                                 : $"КВОТА ВЗЯТА! Эвакуация {(int)evacLeft}с — в круг у портала!");
+                _hud?.SetObjective("ЭВАКУАЦИЯ: встань в круг у портала!");
+            }
+            else if (evac) S.evacLeft = evacLeft;
+            if (int.TryParse(p[6], out var mask))
+                for (int i = 0; i < _loot.Count && i < 31; i++)
+                    if ((mask & (1 << i)) != 0) MarkDepositedRemote(_loot[i]);
+            if (NetSync.ParseF(p[7], out var acc)) S.access = Mathf.Max(S.access, acc);
+        }
+
+        void ApplyLootCarry(Loot l, int pid)
+        {
+            if (l.deposited) return;
+            if (pid == 0)
+            {
+                if (_carried == l) return;   // мой захват новее — не отпускаем
+                l.carrier = 0; l.carried = false; l.hasNet = false;
+                if (l.rb != null) l.rb.isKinematic = false;
+                return;
+            }
+            if (pid == Net.NetManager.MyId) return;
+            // гонка захвата: уступает тот, у кого id больше
+            if (_carried == l)
+            {
+                if (pid > Net.NetManager.MyId) return;
+                DropLoot();
+                _hud?.Toast("Напарник перехватил груз");
+            }
+            l.carrier = pid;
+            l.carried = true;
+            if (l.rb != null) l.rb.isKinematic = true;
+        }
+
+        void MarkDepositedRemote(Loot l)
+        {
+            if (l.deposited) return;
+            if (_carried == l) DropLoot();
+            l.deposited = true;
+            l.carrier = 0;
+            if (l.body != null) Destroy(l.body.gameObject);
+        }
+
+        // реплики роботов: позиции ведёт директор, урон по себе считаем сами
+        void TickGuardReplicas(float dt)
+        {
+            bool hunt = S.AlarmPhase() >= 3;
+            bool seen = !S.myBug && !PlayerHidden;
+            foreach (var g in _guards)
+            {
+                g.meleeCd = Mathf.Max(g.meleeCd - dt, 0f);
+                float moved = (g.t.position - g.lastPos).magnitude;
+                g.lastPos = g.t.position;
+                foreach (var w in g.wheels) w.Rotate(0f, moved / 0.36f * Mathf.Rad2Deg, 0f, Space.Self);
+                if (g.radar != null) g.radar.Rotate(0f, 140f * dt, 0f, Space.Self);
+                if (g.hasNet)
+                {
+                    g.t.position = Vector3.Lerp(g.t.position, g.netPos, Mathf.Min(10f * dt, 1f));
+                    g.t.rotation = Quaternion.Slerp(g.t.rotation, Quaternion.Euler(0, g.netRy, 0), 10f * dt);
+                }
+                if (hunt && seen && g.meleeCd <= 0f
+                    && Vector3.Distance(g.t.position, _player.transform.position) < 1.9f)
+                {
+                    g.meleeCd = 1.4f;
+                    HurtPlayer(g.t.position, 1);
+                }
+            }
+        }
+
+        // реплики крюков: летят к последней известной точке, зацеп считаем сами
+        void TickHookReplicas(float dt)
+        {
+            foreach (var kv in _hookReplicas)
+            {
+                var h = kv.Value;
+                if (h.t == null) continue;
+                h.t.position = Vector3.MoveTowards(h.t.position, h.netPos, HookSpeed * 1.6f * dt);
+                if (!h.caught && !S.myBug && !PlayerHidden &&
+                    Vector3.Distance(h.t.position, _player.transform.position + Vector3.up * 1f) < 1.4f)
+                {
+                    h.caught = true;
+                    Net.NetManager.Send(NetSync.MsgHookCaught(_netScene, kv.Key));
+                    DropLoot();
+                    _hookedUntil = Time.time + 1.6f;
+                    _hookedBy = h.owner;
+                    _player.Shake(0.6f);
+                    _hud?.Toast("🪝 КРЮК ЗАЦЕПИЛ — тебя тянет к роботу!");
+                }
+            }
         }
 
         // ── активки [Q]/[X]/[C] за Bandwidth ──
@@ -1134,7 +1551,7 @@ namespace Virus.World
                     _hud?.Toast("ФАНТОМ: ловушки ведутся (5с)");
                     break;
                 case "jam":
-                    S.ApplyAlarm(-12f);
+                    AlarmEvent(-12f);
                     _hud?.Toast("ГЛУШИЛКА: тревога −12");
                     break;
                 case "haste":
@@ -1148,7 +1565,13 @@ namespace Virus.World
                         float d = Vector3.Distance(g.t.position, _player.transform.position);
                         if (d < bd) { bd = d; nearest = g; }
                     }
-                    if (nearest != null) nearest.stunUntil = now + 4f;
+                    if (nearest != null)
+                    {
+                        nearest.stunUntil = now + 4f;
+                        // симуляцию ведёт директор — сообщаем ему про стан
+                        if (_coop && !_director)
+                            Net.NetManager.Send(NetSync.MsgGuardStun(_netScene, _guards.IndexOf(nearest)));
+                    }
                     _hud?.Toast("ЭМИ-РАЗРЯД: ближайший робот оглушён (4с)");
                     break;
                 case "cloak":
@@ -1158,8 +1581,15 @@ namespace Virus.World
                 case "purge":
                     foreach (var o in _traps) if (o.t != null) Destroy(o.t.gameObject);
                     _traps.Clear();
-                    foreach (var h in _hooks) { if (h.t != null) Destroy(h.t.gameObject); h.owner.hookOut = false; }
+                    foreach (var h in _hooks) { if (h.t != null) Destroy(h.t.gameObject); h.owner.hookOut = false; NetHookEnd(h.owner); }
                     _hooks.Clear();
+                    // не-директор: просим директора смотать крюки, реплики гасим
+                    foreach (var kv in _hookReplicas)
+                    {
+                        if (kv.Value.t != null) Destroy(kv.Value.t.gameObject);
+                        if (_coop && !_director) Net.NetManager.Send(NetSync.MsgHookCaught(_netScene, kv.Key));
+                    }
+                    _hookReplicas.Clear();
                     _hud?.Toast("ЧИСТКА: все летящие ловушки сожжены");
                     break;
                 case "heal":
@@ -1210,7 +1640,7 @@ namespace Virus.World
             _hitLock = 1.2f;
             S.myHp = Mathf.Max(S.myHp - dmg, 0);
             // rootkit бесшумный: система слышит удар вдвое тише
-            S.ApplyAlarm(S.HasPassive("rootkit") ? 1f : 2f);
+            AlarmEvent(S.HasPassive("rootkit") ? 1f : 2f);
             _flashA = Mathf.Min(0.4f + dmg * 0.12f, 0.65f);
             _player.Shake(0.5f + dmg * 0.15f);
             Sfx.Play("trap");
@@ -1231,6 +1661,15 @@ namespace Virus.World
         {
             if (_carried != null)
             {
+                // второй носильщик рядом ускоряет тяжёлый груз
+                bool helper = _carried.weight >= 2 && HelperNear();
+                if (helper != _helperActive)
+                {
+                    _helperActive = helper;
+                    if (helper) _hud?.Toast("ВТОРОЙ НОСИЛЬЩИК: тащите вдвоём — быстрее!");
+                }
+                _player.carryFactor = CarryFactorFor(_carried, helper);
+
                 var target = _player.transform.position + Vector3.up * 2.2f;
                 _carried.body.position = Vector3.Lerp(_carried.body.position, target, Mathf.Min(14f * Time.deltaTime, 1f));
                 if (Vector3.Distance(_carried.body.position, PadPos) < PadRadius + 0.6f)
@@ -1240,6 +1679,8 @@ namespace Virus.World
                     l.deposited = true;
                     float got = S.DepositValue(l.value);
                     Destroy(l.body.gameObject);
+                    if (_coop)
+                        Net.NetManager.Send(NetSync.MsgLootDeposit(_netScene, _loot.IndexOf(l), S.access));
                     string combo = S.ComboCount > 1 ? $"  КОМБО ×{S.ComboMult:0.0} ({S.ComboCount} подряд)" : "";
                     Sfx.Play("deposit");
                     _hud?.Toast($"◈ +{(int)got} — внесено! Добыча {(int)S.access}%{combo}");
@@ -1259,7 +1700,7 @@ namespace Virus.World
                 {
                     _reviveT = 0f;
                     S.myBug = false; S.myHp = 1;
-                    S.ApplyAlarm(5f);
+                    AlarmEvent(5f);
                     _player.SetBug(false);
                     _hud?.Toast("ПЕРЕЗАПУСК: 1 HP. Аккуратнее!");
                 }

@@ -166,6 +166,7 @@ namespace UnityEngine
     public class Transform : Component, IEnumerable
     {
         public Vector3 position, localPosition, localScale = Vector3.one;
+        public Vector3 eulerAngles;
         public Quaternion rotation = Quaternion.identity, localRotation = Quaternion.identity;
         public Vector3 forward = Vector3.forward, right = Vector3.right;
         public Vector3 up { get; set; } = Vector3.up;
@@ -409,6 +410,7 @@ namespace UnityEngine
     public static class Application
     {
         public static bool runInBackground;
+        public static string dataPath = ".";
         public static void Quit() { }
     }
 

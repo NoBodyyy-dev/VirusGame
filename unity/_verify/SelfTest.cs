@@ -136,6 +136,37 @@ static class SelfTest
         var pos = NetSync.Parse(NetSync.MsgPos(2, "raid:7", 1.5f, 0f, -3.25f, 90f));
         Check(pos[0] == "POS" && pos[1] == "2" && pos[2] == "raid:7", "POS кодируется/парсится");
 
+        // ── кооп v2: сид кампании и рейдовые сообщения ──
+        // снапшот выравнивает сиды узлов: арены рейдов совпадут с хостом
+        Check(client.campaignSeed == host.campaignSeed, "снапшот донёс сид кампании");
+        Check(client.gridNodes[7].seed == host.gridNodes[7].seed, "сиды узлов совпали с хостом");
+        int keepSeed = client.gridNodes[7].seed;
+        client.ReseedCampaign(client.campaignSeed);
+        Check(client.gridNodes[7].seed == keepSeed, "повторный перезасев тем же сидом — no-op");
+
+        // состояние системы рейда: тревога/эвакуация/маска вносов/добыча
+        var ras = NetSync.Parse(NetSync.MsgRaidState("raid:7", 63.5f, true, 24.5f, false, 0b101, 87.5f));
+        Check(ras[0] == "RAS" && ras[1] == "raid:7", "RAS: тип и сцена");
+        Check(NetSync.ParseF(ras[2], out var a2) && Math.Abs(a2 - 63.5f) < 0.01f, "RAS: тревога");
+        Check(ras[3] == "1" && ras[5] == "0", "RAS: эвакуация открыта, не WIPE");
+        Check(int.TryParse(ras[6], out var mask) && mask == 5, "RAS: маска вносов");
+        Check(NetSync.ParseF(ras[7], out var acc2) && Math.Abs(acc2 - 87.5f) < 0.01f, "RAS: добыча");
+
+        // роботы/крюки/лут: кодирование → парсинг без потерь
+        var rgp = NetSync.Parse(NetSync.MsgGuardPos("raid:7", 2, -10.25f, 4.5f, 180f));
+        Check(rgp[0] == "RGP" && rgp[2] == "2" && NetSync.ParseF(rgp[3], out var gx2)
+            && Math.Abs(gx2 + 10.25f) < 0.01f, "RGP: позиция робота");
+        var rlt = NetSync.Parse(NetSync.MsgLootThrow("raid:7", 3, 1f, 2f, 3f, -4f, 5f, -6f));
+        Check(rlt.Length == 9 && rlt[0] == "RLT" && NetSync.ParseF(rlt[8], out var vz2)
+            && Math.Abs(vz2 + 6f) < 0.01f, "RLT: бросок с вектором скорости");
+        var rlc = NetSync.Parse(NetSync.MsgLootCarry("raid:7", 4, 2));
+        Check(rlc[0] == "RLC" && rlc[2] == "4" && rlc[3] == "2", "RLC: захват лута");
+        var rald = NetSync.Parse(NetSync.MsgAlarmDelta("raid:7", -8f));
+        Check(rald[0] == "RALD" && NetSync.ParseF(rald[2], out var d2)
+            && Math.Abs(d2 + 8f) < 0.01f, "RALD: поправка тревоги");
+        var rhc = NetSync.Parse(NetSync.MsgHookCaught("raid:7", 1));
+        Check(rhc[0] == "RHC" && rhc[2] == "1", "RHC: зацеп крюком");
+
         Console.WriteLine(_fails == 0
             ? "SELFTEST OK — все проверки ядра прошли"
             : $"SELFTEST: {_fails} провалов");

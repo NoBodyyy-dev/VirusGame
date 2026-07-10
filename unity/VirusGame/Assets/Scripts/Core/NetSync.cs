@@ -26,14 +26,15 @@ namespace Virus.Core
 
         public static string MsgId(int id) => $"ID|{id}";
 
-        // снапшот кампании: флаги, заражённые узлы, жар Грида
+        // снапшот кампании: флаги, заражённые узлы, жар Грида, сид кампании
+        // (сид нужен клиенту, чтобы арены рейдов совпадали с хостом)
         public static string MsgSnapshot(GameState s)
         {
             var flags = new List<string>();
             foreach (var kv in s.gridFlags) if (kv.Value) flags.Add(kv.Key);
             var infected = new List<string>();
             foreach (var n in s.gridNodes) if (n.infected) infected.Add(n.id.ToString());
-            return $"SNAP|{string.Join(",", flags)}|{string.Join(",", infected)}|{(int)s.gridHeat}";
+            return $"SNAP|{string.Join(",", flags)}|{string.Join(",", infected)}|{(int)s.gridHeat}|{s.campaignSeed}";
         }
 
         public static string MsgFlag(string key) => $"FLAG|{Clean(key)}";
@@ -49,12 +50,49 @@ namespace Virus.Core
         public static string MsgToast(string text) => $"MSG|{Clean(text)}";
         public static string MsgBye(int id) => $"BYE|{id}";
 
+        // ── рейд-кооп: сообщения привязаны к сцене "raid:<node>" ──
+        // Директор рейда (наименьший id в узле) владеет тревогой/роботами/крюками.
+
+        // состояние системы: тревога, эвакуация, маска внесённого лута, добыча
+        public static string MsgRaidState(string scene, float alarm, bool evac, float evacLeft,
+            bool wipe, int depositedMask, float access) =>
+            $"RAS|{Clean(scene)}|{F(alarm)}|{(evac ? 1 : 0)}|{F(evacLeft)}|{(wipe ? 1 : 0)}|{depositedMask}|{F(access)}";
+
+        // событийная поправка тревоги от не-директора (задача −8, глушилка −12…)
+        public static string MsgAlarmDelta(string scene, float d) => $"RALD|{Clean(scene)}|{F(d)}";
+
+        public static string MsgGuardPos(string scene, int i, float x, float z, float ry) =>
+            $"RGP|{Clean(scene)}|{i}|{F(x)}|{F(z)}|{F(ry)}";
+
+        public static string MsgGuardStun(string scene, int i) => $"RSTN|{Clean(scene)}|{i}";
+
+        public static string MsgHookPos(string scene, int guardIdx, float x, float y, float z) =>
+            $"RHP|{Clean(scene)}|{guardIdx}|{F(x)}|{F(y)}|{F(z)}";
+
+        public static string MsgHookEnd(string scene, int guardIdx) => $"RHE|{Clean(scene)}|{guardIdx}";
+        public static string MsgHookCaught(string scene, int guardIdx) => $"RHC|{Clean(scene)}|{guardIdx}";
+
+        // лут: захват (pid=0 — отпустил), позиция у носильщика, бросок, внос
+        public static string MsgLootCarry(string scene, int idx, int pid) => $"RLC|{Clean(scene)}|{idx}|{pid}";
+
+        public static string MsgLootPos(string scene, int idx, float x, float y, float z) =>
+            $"RLP|{Clean(scene)}|{idx}|{F(x)}|{F(y)}|{F(z)}";
+
+        public static string MsgLootThrow(string scene, int idx, float x, float y, float z,
+            float vx, float vy, float vz) =>
+            $"RLT|{Clean(scene)}|{idx}|{F(x)}|{F(y)}|{F(z)}|{F(vx)}|{F(vy)}|{F(vz)}";
+
+        public static string MsgLootDeposit(string scene, int idx, float access) =>
+            $"RLD|{Clean(scene)}|{idx}|{F(access)}";
+
         public static string[] Parse(string line) => (line ?? "").TrimEnd('\r').Split('|');
 
         // ── применение к состоянию (без эха обратно в сеть) ──
         public static void ApplySnapshot(GameState s, string[] p)
         {
             if (p.Length < 4) return;
+            // сначала сид: арены рейдов должны совпасть с хостом
+            if (p.Length >= 5 && int.TryParse(p[4], out var seed)) s.ReseedCampaign(seed);
             foreach (var f in p[1].Split(','))
                 if (f.Length > 0) s.ApplyRemoteFlag(f);
             foreach (var idStr in p[2].Split(','))

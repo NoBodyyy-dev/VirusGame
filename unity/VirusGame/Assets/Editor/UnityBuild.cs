@@ -144,10 +144,40 @@ namespace Virus.EditorTools
             Debug.Log("[VirusBuild] URP configured (Forward+, HDR, base mats)");
         }
 
+        // Steamworks.NET: define ставим только если пакет реально установлен —
+        // иначе SteamNet.cs компилируется в пустоту и игра живёт без Steam.
+        static bool HasSteamworks()
+        {
+            foreach (var a in System.AppDomain.CurrentDomain.GetAssemblies())
+                if (a.GetType("Steamworks.SteamAPI") != null) return true;
+            return false;
+        }
+
+        static void EnsureSteamDefine()
+        {
+            var target = UnityEditor.Build.NamedBuildTarget.Standalone;
+            var defines = PlayerSettings.GetScriptingDefineSymbols(target);
+            bool has = System.Array.IndexOf(defines.Split(';'), "STEAMWORKS_NET") >= 0;
+            if (HasSteamworks() && !has)
+            {
+                PlayerSettings.SetScriptingDefineSymbols(target,
+                    defines.Length > 0 ? defines + ";STEAMWORKS_NET" : "STEAMWORKS_NET");
+                Debug.Log("[VirusBuild] +define STEAMWORKS_NET (пакет Steamworks.NET найден)");
+            }
+            else if (!HasSteamworks() && has)
+            {
+                var list = new System.Collections.Generic.List<string>(defines.Split(';'));
+                list.Remove("STEAMWORKS_NET");
+                PlayerSettings.SetScriptingDefineSymbols(target, string.Join(";", list));
+                Debug.Log("[VirusBuild] -define STEAMWORKS_NET (пакета нет)");
+            }
+        }
+
         [MenuItem("Virus/Build Windows")]
         public static void BuildWindows()
         {
             PlayerSettings.runInBackground = true;   // кооп двумя окнами + автопроверки
+            EnsureSteamDefine();
             SetupURP();
             // Форсим только Standard (обычный шейдер, иначе вырезается).
             // Шрифтовые/UI-шейдеры (GUI/Text Shader, UI/Default) — встроенные
@@ -176,6 +206,10 @@ namespace Virus.EditorTools
                       $"errors={report.summary.totalErrors} size={report.summary.totalSize}");
             if (report.summary.result != UnityEditor.Build.Reporting.BuildResult.Succeeded)
                 EditorApplication.Exit(1);
+            // Steam: тестовый AppId (480, Spacewar) рядом с exe — SteamAPI.Init()
+            // вне запуска из Steam требует этот файл
+            if (HasSteamworks())
+                File.WriteAllText(Path.Combine(dir, "steam_appid.txt"), "480");
         }
     }
 }

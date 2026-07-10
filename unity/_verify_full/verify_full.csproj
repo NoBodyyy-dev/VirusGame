@@ -7,9 +7,12 @@
     <LangVersion>latest</LangVersion>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <NoWarn>CS0414;CS0649;CS0067</NoWarn>
+    <!-- STEAMWORKS_NET: компилируем и Steam-путь (шимы SteamShims.cs) -->
+    <DefineConstants>$(DefineConstants);STEAMWORKS_NET</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="UnityFullShims.cs" />
+    <Compile Include="SteamShims.cs" />
     <Compile Include="..\VirusGame\Assets\Scripts\**\*.cs" Exclude="..\VirusGame\Assets\Scripts\Editor\**\*.cs" />
   </ItemGroup>
 </Project>

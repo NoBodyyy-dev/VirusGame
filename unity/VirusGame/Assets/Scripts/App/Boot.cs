@@ -101,6 +101,10 @@ namespace Virus.App
             var args = System.Environment.GetCommandLineArgs();
             if (System.Array.IndexOf(args, "-host") >= 0)
             { GameState.I.NewCampaign(); Net.NetManager.StartHost(); SceneFlow.GoGrid(); return; }
+            if (System.Array.IndexOf(args, "-steamhost") >= 0)
+            { GameState.I.NewCampaign(); Net.NetManager.StartSteamHost(); SceneFlow.GoGrid(); return; }
+            if (System.Array.IndexOf(args, "-steamjoin") >= 0)
+            { GameState.I.NewCampaign(); Net.NetManager.JoinSteamLobby(); SceneFlow.GoGrid(); return; }
             int joinAt = System.Array.IndexOf(args, "-join");
             if (joinAt >= 0)
             {
@@ -150,18 +154,37 @@ namespace Virus.App
                 GameState.I.NewCampaign();
                 SceneFlow.GoGrid();
             });
-            Btn(canvasGo.transform, "КООП: СОЗДАТЬ СТАЮ (LAN)", new Vector2(0, -95), () =>
+            Btn(canvasGo.transform, "КООП: СОЗДАТЬ СТАЮ (LAN)", new Vector2(-210, -95), () =>
             {
                 GameState.I.NewCampaign();
                 Net.NetManager.StartHost();
                 SceneFlow.GoGrid();
             });
-            Btn(canvasGo.transform, "КООП: ВОЙТИ (localhost / -join <ip>)", new Vector2(0, -160), () =>
+            Btn(canvasGo.transform, "КООП: ВОЙТИ (LAN / -join <ip>)", new Vector2(-210, -160), () =>
             {
                 GameState.I.NewCampaign();
                 Net.NetManager.StartClient("127.0.0.1");
                 SceneFlow.GoGrid();
             });
+            // Steam-кнопки живут только при работающем Steam-клиенте
+            if (Net.NetManager.SteamReady)
+            {
+                Btn(canvasGo.transform, "КООП: STEAM — СОЗДАТЬ ЛОББИ", new Vector2(210, -95), () =>
+                {
+                    GameState.I.NewCampaign();
+                    Net.NetManager.StartSteamHost();
+                    SceneFlow.GoGrid();
+                });
+                Btn(canvasGo.transform, "КООП: STEAM — НАЙТИ ЛОББИ", new Vector2(210, -160), () =>
+                {
+                    GameState.I.NewCampaign();
+                    Net.NetManager.JoinSteamLobby();
+                    SceneFlow.GoGrid();
+                });
+            }
+            else
+                T(canvasGo.transform, "Steam не запущен — кооп через Steam недоступен",
+                    new Vector2(210, -128), 15, new Color(0.4f, 0.5f, 0.6f));
             if (GameState.I.gridNodes.Count > 0 && GameState.I.InfectedTotal() > 0 && !GameState.I.campaignWon)
                 Btn(canvasGo.transform, "ПРОДОЛЖИТЬ", new Vector2(0, -225), SceneFlow.GoGrid);
             Btn(canvasGo.transform, "ВЫХОД", new Vector2(0, -290), Application.Quit);
