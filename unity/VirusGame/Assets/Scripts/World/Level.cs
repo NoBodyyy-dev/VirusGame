@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -8,12 +9,15 @@ namespace Virus.World
 {
     // Порт ядра level.gd: рейд-ограбление внутри сервера.
     // Арена по теме тира, физический лут (тащи к порталу), СИСТЕМА с тревогой
-    // (SLEEP→SCAN→PURGE→WIPE), ловушки из стен, роботы-охранники по углам
-    // (охота на 100%), HP/баг, эвакуация по квоте, экран результатов.
+    // (SLEEP→SCAN→PURGE→WIPE), типизированные ловушки из стен (лазер/клетка/
+    // сброс/притяжение/метка/перепрошивка), роботы по углам: с 50% тревоги
+    // пускают крюк-притягиватель, на 100% выходят на охоту. Активки [Q]/[X]/[C]
+    // за Bandwidth, полевые задачи, HP/баг, эвакуация по квоте, результаты.
     public class Level : MonoBehaviour
     {
         static readonly Vector3 PadPos = new(-27, 0, 0);
         const float PadRadius = 3.6f;
+        const float HookSpeed = 11.5f, HookReturn = 14f, HookRange = 32f;
 
         GameState S => GameState.I;
         Player.VirusPlayer _player;
@@ -21,20 +25,30 @@ namespace Virus.World
         System.Random _rng;
         float _hallW, _hallD;
 
-        class Loot { public Transform body; public Rigidbody rb; public float value; public int weight; public bool carried, deposited; public TextMesh label; }
+        class Loot { public Transform body; public Rigidbody rb; public float value; public int weight; public bool carried, deposited; public TextMesh label; public GameObject beacon; }
         readonly List<Loot> _loot = new();
         Loot _carried;
 
-        class Orb { public Transform t; public float life; }
-        readonly List<Orb> _orbs = new();
-        class Guard { public Transform t; public Vector3 home; public float meleeCd; }
+        class Trap { public Transform t; public string kind; public float life, speed; }
+        readonly List<Trap> _traps = new();
+
+        class Guard { public Transform t; public Vector3 home; public float meleeCd, hookCd, stunUntil; public bool hookOut; }
         readonly List<Guard> _guards = new();
+
+        class Hook { public Transform t; public Guard owner; public Vector3 dir; public bool ret; public bool caught; }
+        readonly List<Hook> _hooks = new();
+
+        // статусы системы/активок (метки Time.time)
+        float _frozenUntil, _decoyUntil, _cloakUntil, _markedUntil, _hookedUntil, _abilityCd;
+        Vector3 _decoyPos;
+        Guard _hookedBy;
 
         float _trapTimer, _hitLock, _reviveT;
         int _phaseSeen;
         bool _done;
-        Light _moon;
         Color _accent;
+        TextMesh _sysScreen;
+        Image _fade;
 
         void Start()
         {
@@ -54,6 +68,7 @@ namespace Virus.World
             BuildPortal();
             SpawnLoot();
             SpawnGuards();
+            SpawnFieldTasks();
             SpawnPlayer();
 
             _hud = FindFirstObjectByType<UI.Hud>();
@@ -61,8 +76,50 @@ namespace Virus.World
             {
                 _hud.raidMode = true;
                 _hud.Toast($"{S.raid.name} · {GameData.TIERS[S.raid.tier].name} · выносим лут и тихо!");
+                if (S.raid.assist > 0)
+                    _hud.Toast($"ВСПОМОГАТЕЛЬНЫЙ ВЗЛОМ: {S.raid.assist} серверов зоны помогают (−{(int)(S.raid.assistK * 100)}% защиты)");
                 _hud.SetObjective("Тащи лут в круг у портала — набери 100% квоты");
             }
+            StartCoroutine(EnterAnimation());
+        }
+
+        // ── анимация захода в сервер: тьма → вспышка кода → игра ──
+        IEnumerator EnterAnimation()
+        {
+            var canvasGo = new GameObject("Fade", typeof(Canvas), typeof(CanvasScaler));
+            var canvas = canvasGo.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 90;
+            var go = new GameObject("dim", typeof(RectTransform));
+            go.transform.SetParent(canvasGo.transform, false);
+            _fade = go.AddComponent<Image>();
+            var rt = _fade.rectTransform;
+            rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
+            rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
+            _fade.color = new Color(0.0f, 0.01f, 0.02f, 1f);
+
+            var txtGo = new GameObject("txt", typeof(RectTransform));
+            txtGo.transform.SetParent(canvasGo.transform, false);
+            var txt = txtGo.AddComponent<Text>();
+            txt.font = Build.UIFont;
+            txt.fontSize = 30;
+            txt.alignment = TextAnchor.MiddleCenter;
+            txt.color = GameData.INFECTED;
+            txt.horizontalOverflow = HorizontalWrapMode.Overflow;
+            txt.rectTransform.sizeDelta = new Vector2(1200, 60);
+            txt.text = $">> инъекция в {S.raid.name} · обход {S.raid.av}…";
+
+            float t = 0f;
+            while (t < 1.4f)
+            {
+                t += Time.deltaTime;
+                float k = Mathf.Clamp01(t / 1.4f);
+                _fade.color = new Color(0, 0.01f, 0.02f, 1f - k);
+                txt.color = new Color(GameData.INFECTED.r, GameData.INFECTED.g, GameData.INFECTED.b, 1f - k * k);
+                yield return null;
+            }
+            Destroy(canvasGo);
+            _fade = null;
         }
 
         float R(float a, float b) => Mathf.Lerp(a, b, (float)_rng.NextDouble());
@@ -80,12 +137,12 @@ namespace Virus.World
             RenderSettings.fogDensity = 0.004f;
             RenderSettings.skybox = null;
 
-            _moon = new GameObject("Fill").AddComponent<Light>();
-            _moon.type = LightType.Directional;
-            _moon.color = new Color(0.55f, 0.65f, 0.85f);
-            _moon.intensity = 0.5f;
-            _moon.transform.rotation = Quaternion.Euler(58, -28, 0);
-            _moon.shadows = LightShadows.Soft;
+            var moon = new GameObject("Fill").AddComponent<Light>();
+            moon.type = LightType.Directional;
+            moon.color = new Color(0.55f, 0.65f, 0.85f);
+            moon.intensity = 0.5f;
+            moon.transform.rotation = Quaternion.Euler(58, -28, 0);
+            moon.shadows = LightShadows.Soft;
         }
 
         void BuildArena()
@@ -128,8 +185,6 @@ namespace Virus.World
             Build.MeshBox(transform, new Vector3(11, 4.6f, 0.5f), Mats.Plastic(new Color(0.2f, 0.22f, 0.26f)), new Vector3(6, 3.4f, -hz + 0.6f));
             _sysScreen = Build.Label(transform, "", new Vector3(6, 3.4f, -hz + 1.0f), 3.4f, new Color(0.75f, 0.95f, 1f), false);
         }
-
-        TextMesh _sysScreen;
 
         void BuildPortal()
         {
@@ -180,7 +235,13 @@ namespace Virus.World
             loot.carried = true;
             loot.rb.isKinematic = true;
             _player.carrying = true;
-            _player.carryFactor = loot.weight >= 2 ? 0.38f : 0.78f;
+            // ransomware тащит тяжёлое как лёгкое; червь страдает от груза меньше
+            float heavy = S.HasPassive("ransomware") ? 0.72f : 0.38f;
+            float light = 0.78f;
+            float k = loot.weight >= 2 ? heavy : light;
+            if (S.HasPassive("worm")) k = Mathf.Min(k + 0.12f, 0.95f);
+            _player.carryFactor = k;
+            _player.SetMorph(false);
         }
 
         void DropLoot()
@@ -189,8 +250,11 @@ namespace Virus.World
             _carried.carried = false;
             _carried.rb.isKinematic = false;
             _carried = null;
-            _player.carrying = false;
-            _player.carryFactor = 1f;
+            if (_player != null)
+            {
+                _player.carrying = false;
+                _player.carryFactor = 1f;
+            }
         }
 
         void SpawnGuards()
@@ -208,8 +272,44 @@ namespace Virus.World
                 Build.MeshBox(root, new Vector3(1.35f, 1f, 1.1f), body, new Vector3(0, 1.75f, 0));
                 Build.MeshBox(root, Vector3.one * 0.6f, body, new Vector3(0, 2.5f, 0));
                 Build.MeshBox(root, Vector3.one * 0.26f, Mats.Neon(new Color(1f, 0.2f, 0.2f), 4f), new Vector3(0, 2.55f, 0.34f));
+                // дуло крюка
+                Build.MeshBox(root, new Vector3(0.2f, 0.2f, 0.6f), Mats.Metal(new Color(0.35f, 0.38f, 0.42f), 0.6f), new Vector3(0, 1.9f, 0.75f));
                 Build.Omni(root, new Vector3(0, 2.6f, 0), new Color(1f, 0.25f, 0.2f), 1.4f, 9f);
-                _guards.Add(new Guard { t = root, home = corners[i] });
+                _guards.Add(new Guard { t = root, home = corners[i], hookCd = (float)_rng.NextDouble() * 4f + 4f });
+            }
+        }
+
+        // полевые кооп-задачи: сервисные консоли — подержи [E], собьёшь тревогу
+        void SpawnFieldTasks()
+        {
+            float hx = _hallW * 0.5f, hz = _hallD * 0.5f;
+            int n = GameData.TIERS[S.raid.tier].tasks;
+            for (int i = 0; i < n; i++)
+            {
+                var pos = new Vector3(R(-hx + 7, hx - 7), 0, R(-hz + 5, hz - 5));
+                if (Vector3.Distance(pos, PadPos) < 9f) pos.x = Mathf.Abs(pos.x);
+                var root = new GameObject("task").transform;
+                root.SetParent(transform, false);
+                root.localPosition = pos;
+                Build.Solid(root, new Vector3(1.1f, 1.3f, 0.7f), Mats.Plastic(new Color(0.14f, 0.2f, 0.26f)), new Vector3(0, 0.65f, 0));
+                var led = Build.MeshBox(root, new Vector3(0.8f, 0.5f, 0.06f), Mats.Neon(new Color(1f, 0.7f, 0.35f), 1.6f), new Vector3(0, 0.9f, -0.39f));
+                var label = Build.Label(root, "СЕРВИСНАЯ КОНСОЛЬ\nполевая задача", new Vector3(0, 2f, 0), 2.4f, new Color(1f, 0.7f, 0.35f));
+                bool used = false;
+                var it = root.gameObject.AddComponent<Interactable>();
+                it.radius = 3f;
+                it.holdSeconds = 3f;
+                it.prompt = "[E·держать] откалибровать консоль (тревога −6)";
+                it.enabledFn = () => !used && !S.myBug;
+                it.onInteract = () =>
+                {
+                    used = true;
+                    S.ApplyAlarm(-6f);
+                    S.CareerEvent("tasks");
+                    led.GetComponent<MeshRenderer>().sharedMaterial = Mats.Neon(new Color(0.4f, 0.42f, 0.45f), 0.4f);
+                    label.text = "СЕРВИСНАЯ КОНСОЛЬ\n// ИСПОЛЬЗОВАНА //";
+                    label.color = new Color(0.45f, 0.5f, 0.55f);
+                    _hud?.Toast("Консоль откалибрована: тревога −6, карьера +1 задача");
+                };
             }
         }
 
@@ -218,6 +318,16 @@ namespace Virus.World
             var go = new GameObject("Player", typeof(CharacterController), typeof(Player.VirusPlayer));
             _player = go.GetComponent<Player.VirusPlayer>();
             go.transform.position = new Vector3(-27, 1.2f, 3);
+            _player.morphBroken = () => _hud?.Toast("Морф слетел — ты двинулся!");
+        }
+
+        bool Frozen => Time.time < _frozenUntil;
+        bool PlayerHidden => _player.Morphed || (Time.time < _cloakUntil && Time.time >= _markedUntil);
+
+        Vector3 TrapTargetPos()
+        {
+            if (Time.time < _decoyUntil) return _decoyPos;
+            return _player.transform.position + Vector3.up * 1.1f;
         }
 
         void Update()
@@ -225,12 +335,19 @@ namespace Virus.World
             if (_done || _player == null) return;
             float dt = Time.deltaTime;
             _hitLock = Mathf.Max(_hitLock - dt, 0f);
+            _abilityCd = Mathf.Max(_abilityCd - dt, 0f);
 
             // тревога ползёт сама; на эвакуации — быстрее
             S.ApplyAlarm(S.raid.creep * (S.evacOpen ? 1.6f : 1f) * dt);
             TickPhaseFx();
-            TickTraps(dt);
-            TickGuards(dt);
+            if (!Frozen)
+            {
+                TickTraps(dt);
+                TickGuards(dt);
+                TickHooks(dt);
+            }
+            TickHooked(dt);
+            TickAbilities();
             TickCarryAndDeposit();
             TickBugAndRevive(dt);
             TickEvac(dt);
@@ -242,7 +359,7 @@ namespace Virus.World
             int ph = S.AlarmPhase();
             if (ph != _phaseSeen && ph > _phaseSeen)
             {
-                string[] msg = { "", "СИСТЕМА: СКАНИРОВАНИЕ — ловушки активированы!", "СИСТЕМА: ЗАЧИСТКА — ловушки летят чаще!", "СИСТЕМА: ВТОРЖЕНИЕ — роботы вышли на охоту!" };
+                string[] msg = { "", "СИСТЕМА: СКАНИРОВАНИЕ — ловушки активированы!", "СИСТЕМА: ЗАЧИСТКА — роботы заряжают крюки!", "СИСТЕМА: ВТОРЖЕНИЕ — роботы вышли на охоту!" };
                 _hud?.Toast(msg[ph]);
             }
             _phaseSeen = ph;
@@ -255,50 +372,145 @@ namespace Virus.World
             };
         }
 
+        // ── ловушки: типизированные снаряды из ближайшей стены ──
         void TickTraps(float dt)
         {
-            // сфера-ловушка летит в игрока из ближайшей стены (фаза SCAN+)
-            if (S.AlarmPhase() >= 1 && !S.myBug)
+            if (S.AlarmPhase() >= 1 && !S.myBug && !PlayerHidden)
             {
                 float speedup = 1f + S.alarm / 100f + S.raid.tier * 0.25f;
+                if (Time.time < _markedUntil) speedup *= 1.6f;   // метка: система ведёт тебя
                 _trapTimer -= dt * speedup;
                 if (_trapTimer <= 0f)
                 {
                     _trapTimer = S.raid.trapInterval;
-                    float hx = _hallW * 0.5f, hz = _hallD * 0.5f;
-                    var pp = _player.transform.position;
-                    var candidates = new[] { new Vector3(-hx + 1, 2.2f, pp.z), new Vector3(hx - 1, 2.2f, pp.z), new Vector3(pp.x, 2.2f, -hz + 1), new Vector3(pp.x, 2.2f, hz - 1) };
-                    var origin = candidates[0];
-                    foreach (var c in candidates) if (Vector3.Distance(c, pp) < Vector3.Distance(origin, pp)) origin = c;
-                    var orb = Build.MeshBox(transform, Vector3.one * 0.45f, Mats.Neon(new Color(1f, 0.25f, 0.3f), 3.5f), origin);
-                    Build.Omni(orb.transform, Vector3.zero, new Color(1f, 0.25f, 0.3f), 1.2f, 4f);
-                    _orbs.Add(new Orb { t = orb.transform, life = 12f });
+                    SpawnTrap();
                 }
             }
-            for (int i = _orbs.Count - 1; i >= 0; i--)
+            for (int i = _traps.Count - 1; i >= 0; i--)
             {
-                var o = _orbs[i];
+                var o = _traps[i];
                 o.life -= dt;
-                if (o.t == null || o.life <= 0f) { if (o.t != null) Destroy(o.t.gameObject); _orbs.RemoveAt(i); continue; }
-                var target = _player.transform.position + Vector3.up * 1.1f;
-                o.t.position = Vector3.MoveTowards(o.t.position, target, 8.5f * dt);
-                if (Vector3.Distance(o.t.position, target) < 1f)
+                if (o.t == null || o.life <= 0f) { if (o.t != null) Destroy(o.t.gameObject); _traps.RemoveAt(i); continue; }
+                var target = TrapTargetPos();
+                o.t.position = Vector3.MoveTowards(o.t.position, target, o.speed * dt);
+                if (Vector3.Distance(o.t.position, _player.transform.position + Vector3.up * 1.1f) < 1f)
                 {
+                    var from = o.t.position;
                     Destroy(o.t.gameObject);
-                    _orbs.RemoveAt(i);
-                    HurtPlayer(o.t.position);
+                    _traps.RemoveAt(i);
+                    ApplyTrapHit(o.kind, from);
                 }
             }
         }
 
+        void SpawnTrap()
+        {
+            // доступные типы по тиру узла (из GameData.TIERS)
+            var kinds = S.raid != null ? GameData.TIERS[S.raid.tier].traps : new[] { "laser" };
+            string kind = kinds[_rng.Next(kinds.Length)];
+            var info = GameData.TRAPS[kind];
+
+            float hx = _hallW * 0.5f, hz = _hallD * 0.5f;
+            var pp = _player.transform.position;
+            var candidates = new[] { new Vector3(-hx + 1, 2.2f, pp.z), new Vector3(hx - 1, 2.2f, pp.z), new Vector3(pp.x, 2.2f, -hz + 1), new Vector3(pp.x, 2.2f, hz - 1) };
+            var origin = candidates[0];
+            foreach (var c in candidates) if (Vector3.Distance(c, pp) < Vector3.Distance(origin, pp)) origin = c;
+
+            GameObject body;
+            if (kind == "reflash")   // летящая флешка
+            {
+                body = Build.MeshBox(transform, new Vector3(0.28f, 0.28f, 0.72f), Mats.Neon(info.color, 3f), origin);
+                Build.MeshBox(body.transform, new Vector3(0.55f, 0.12f, 0.4f), Mats.Metal(new Color(0.7f, 0.72f, 0.76f), 0.4f), new Vector3(0, 0, -1f));
+            }
+            else if (kind == "cage")
+            {
+                body = Build.MeshBox(transform, Vector3.one * 0.55f, Mats.Neon(info.color, 2.2f), origin);
+                Build.MeshBox(body.transform, Vector3.one * 1.25f, Mats.Neon(info.color, 0.7f), Vector3.zero);
+            }
+            else
+                body = Build.MeshBox(transform, Vector3.one * 0.45f, Mats.Neon(info.color, 3.5f), origin);
+            Build.Omni(body.transform, Vector3.zero, info.color, 1.2f, 4f);
+            Build.Label(body.transform, info.name, new Vector3(0, 0.7f, 0), 1.8f, info.color);
+            _traps.Add(new Trap { t = body.transform, kind = kind, life = info.life, speed = info.speed });
+        }
+
+        void ApplyTrapHit(string kind, Vector3 from)
+        {
+            float now = Time.time;
+            switch (kind)
+            {
+                case "laser":
+                    HurtPlayer(from, 1);
+                    break;
+                case "cage":
+                    _player.lockedUntil = now + 8f;
+                    SpawnDome(8f, GameData.TRAPS["cage"].color);
+                    _hud?.Toast("КЛЕТКА: 8 секунд без движения!");
+                    break;
+                case "mark":
+                    _markedUntil = now + 10f;
+                    HurtPlayer(from, 1);
+                    _hud?.Toast("МЕТКА: система ведёт тебя 10 секунд");
+                    break;
+                case "reset":
+                    S.resetUntil = S.now + 10f;
+                    _hud?.Toast("СБРОС ДО НУЛЯ: скин и ветка отключены на 10 секунд");
+                    break;
+                case "pull":
+                    HurtPlayer(from, 1);
+                    var dir = NearestWallDir(_player.transform.position);
+                    _player.Impulse(dir * 20f + Vector3.up * 4f);
+                    _hud?.Toast("ПРИТЯЖЕНИЕ: тебя утянуло к стене!");
+                    break;
+                case "reflash":
+                    _player.lockedUntil = now + 2.5f;
+                    _player.slowUntil = now + 15f;
+                    var lost = S.StealAbility();
+                    HurtPlayer(from, 3);
+                    SpawnDome(2.5f, GameData.TRAPS["reflash"].color);
+                    _hud?.Toast("ПЕРЕПРОШИВКА: −3 HP, замедление 15с" +
+                        (lost != "" ? $" · украдено умение «{GameData.ABILITIES[lost].name}»" : ""));
+                    break;
+            }
+        }
+
+        Vector3 NearestWallDir(Vector3 p)
+        {
+            float hx = _hallW * 0.5f, hz = _hallD * 0.5f;
+            var best = Vector3.right; float bestD = hx - p.x;
+            if (hx + p.x < bestD) { best = Vector3.left; bestD = hx + p.x; }
+            if (hz - p.z < bestD) { best = Vector3.forward; bestD = hz - p.z; }
+            if (hz + p.z < bestD) best = Vector3.back;
+            return best;
+        }
+
+        // купол с кодом вокруг жертвы (клетка/перепрошивка)
+        void SpawnDome(float dur, Color color)
+        {
+            var dome = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            Destroy(dome.GetComponent<Collider>());
+            dome.transform.SetParent(_player.transform, false);
+            dome.transform.localPosition = new Vector3(0, 1f, 0);
+            dome.transform.localScale = Vector3.one * 3f;
+            dome.GetComponent<MeshRenderer>().sharedMaterial = Mats.Neon(color, 0.55f);
+            Destroy(dome, dur);
+        }
+
+        // ── роботы: угол → крюки (50%) → погоня (100%) ──
         void TickGuards(float dt)
         {
             bool hunt = S.AlarmPhase() >= 3;
+            bool seen = !S.myBug && !PlayerHidden;
             foreach (var g in _guards)
             {
                 g.meleeCd = Mathf.Max(g.meleeCd - dt, 0f);
+                g.hookCd = Mathf.Max(g.hookCd - dt, 0f);
+                if (Time.time < g.stunUntil || g.hookOut) continue;   // ЭМИ или крюк в полёте — робот замер
+
                 var pp = _player.transform.position;
-                if (hunt && !S.myBug)
+                float dist = Vector3.Distance(g.t.position, pp);
+
+                if (hunt && seen)
                 {
                     var dir = pp - g.t.position; dir.y = 0;
                     if (dir.magnitude > 1.6f)
@@ -306,33 +518,230 @@ namespace Virus.World
                         g.t.position += dir.normalized * (6f * dt);
                         g.t.rotation = Quaternion.Slerp(g.t.rotation, Quaternion.LookRotation(dir), 8f * dt);
                     }
-                    else if (g.meleeCd <= 0f) { g.meleeCd = 1.4f; HurtPlayer(g.t.position); }
+                    else if (g.meleeCd <= 0f) { g.meleeCd = 1.4f; HurtPlayer(g.t.position, 1); }
                 }
                 else
                 {
                     var back = g.home - g.t.position; back.y = 0;
                     if (back.magnitude > 1f) g.t.position += back.normalized * (3.5f * dt);
+                    else if (seen && dist < S.raid.camRange * 1.4f)
+                    {
+                        var face = pp - g.t.position; face.y = 0;
+                        if (face.sqrMagnitude > 0.1f)
+                            g.t.rotation = Quaternion.Slerp(g.t.rotation, Quaternion.LookRotation(face), 4f * dt);
+                    }
+                }
+
+                // крюк: с 50% тревоги по цели в радиусе обзора (на 100% — дальнобойный)
+                float sight = hunt ? HookRange : S.raid.camRange * 1.4f;
+                if (S.alarm >= 50f && seen && g.hookCd <= 0f && dist > 3f && dist < sight)
+                {
+                    g.hookCd = (float)_rng.NextDouble() * 4f + 5f;
+                    g.hookOut = true;
+                    var origin = g.t.position + Vector3.up * 1.9f;
+                    var hdir = (pp + Vector3.up * 1f - origin).normalized;
+                    var body = Build.MeshBox(transform, new Vector3(0.3f, 0.3f, 0.6f), Mats.Neon(new Color(1f, 0.5f, 0.2f), 3f), origin);
+                    Build.Omni(body.transform, Vector3.zero, new Color(1f, 0.5f, 0.2f), 1f, 4f);
+                    body.transform.rotation = Quaternion.LookRotation(hdir);
+                    _hooks.Add(new Hook { t = body.transform, owner = g, dir = hdir });
+                    _hud?.Toast("⚠ РОБОТ ВЫПУСТИЛ КРЮК — уворачивайся!");
                 }
             }
         }
 
-        void HurtPlayer(Vector3 from)
+        void TickHooks(float dt)
+        {
+            for (int i = _hooks.Count - 1; i >= 0; i--)
+            {
+                var h = _hooks[i];
+                if (h.t == null) { h.owner.hookOut = false; _hooks.RemoveAt(i); continue; }
+                var robotPos = h.owner.t.position + Vector3.up * 1.9f;
+                float hx = _hallW * 0.5f, hz = _hallD * 0.5f;
+
+                if (!h.ret)
+                {
+                    h.t.position += h.dir * (HookSpeed * dt);
+                    var p = h.t.position;
+                    // граница зала или дальность — крюк возвращается
+                    if (Mathf.Abs(p.x) > hx - 1f || Mathf.Abs(p.z) > hz - 1f ||
+                        Vector3.Distance(p, robotPos) > HookRange)
+                        h.ret = true;
+                }
+                else
+                {
+                    var back = robotPos - h.t.position;
+                    if (back.magnitude < 1.2f)
+                    {
+                        h.owner.hookOut = false;
+                        Destroy(h.t.gameObject);
+                        _hooks.RemoveAt(i);
+                        continue;
+                    }
+                    h.t.position += back.normalized * (HookReturn * dt);
+                }
+
+                // зацепил? жертва роняет груз и волочётся к роботу (не убивает!)
+                if (!h.caught && !S.myBug && !PlayerHidden &&
+                    Vector3.Distance(h.t.position, _player.transform.position + Vector3.up * 1f) < 1.2f)
+                {
+                    h.caught = true;
+                    h.ret = true;
+                    DropLoot();
+                    _hookedUntil = Time.time + 1.6f;
+                    _hookedBy = h.owner;
+                    _hud?.Toast("🪝 КРЮК ЗАЦЕПИЛ — тебя тянет к роботу!");
+                }
+            }
+        }
+
+        // тянет жертву к роботу, у клешней добьёт melee-удар
+        void TickHooked(float dt)
+        {
+            if (Time.time >= _hookedUntil || S.myBug || _hookedBy == null) return;
+            var rp = _hookedBy.t.position;
+            var pull = rp - _player.transform.position;
+            pull.y = 0f;
+            if (pull.magnitude < 2f) { _hookedUntil = 0f; return; }
+            _player.Teleport(_player.transform.position + pull.normalized * (13f * dt));
+        }
+
+        // ── активки [Q]/[X]/[C] за Bandwidth ──
+        void TickAbilities()
+        {
+            if (UI.PuzzleUI.IsOpen || UI.EvolutionUI.IsOpen) return;
+            if (Input.GetKeyDown(KeyCode.Q)) UseAbility(0);
+            if (Input.GetKeyDown(KeyCode.X)) UseAbility(1);
+            if (Input.GetKeyDown(KeyCode.C)) UseAbility(2);
+        }
+
+        void UseAbility(int slot)
+        {
+            if (S.myBug) { _hud?.Toast("ты баг. у багов нет активок. у багов есть только писк"); return; }
+            if (_player.Locked) { _hud?.Toast("умения заблокированы ловушкой!"); return; }
+            if (slot >= S.activeAbilities.Count)
+            {
+                if (S.activeAbilities.Count == 0)
+                    _hud?.Toast("нет активок: выбери ветку и УР.1 в дереве эволюции [Tab] (в Гриде)");
+                return;
+            }
+            if (_abilityCd > 0f) { _hud?.Toast("активка перезаряжается"); return; }
+            string id = S.activeAbilities[slot];
+            float cost = S.AbilityCost(id);
+            if (!S.TrySpendBandwidth(cost)) { _hud?.Toast("недостаточно Bandwidth"); return; }
+
+            float now = Time.time;
+            switch (id)
+            {
+                case "morph":
+                    _player.SetMorph(true);
+                    _hud?.Toast("ЛОЖНЫЙ ФАЙЛ: замри — роботы тебя не видят. Движение снимает морф");
+                    break;
+                case "dash":
+                    _player.Dash();
+                    _hud?.Toast("РЫВОК!");
+                    break;
+                case "freeze":
+                    _frozenUntil = now + 3f;
+                    _hud?.Toast("ШИФРОВАНИЕ: система и ловушки заморожены (3с)");
+                    break;
+                case "xray":
+                    StartCoroutine(XRay(6f));
+                    _hud?.Toast("СКАН: лут и угрозы подсвечены (6с)");
+                    break;
+                case "decoy":
+                    _decoyUntil = now + 5f;
+                    _decoyPos = _player.transform.position + _player.LookDir() * 4f + Vector3.up * 1.2f;
+                    SpawnDecoyGhost(_decoyPos);
+                    _hud?.Toast("ФАНТОМ: ловушки ведутся (5с)");
+                    break;
+                case "jam":
+                    S.ApplyAlarm(-12f);
+                    _hud?.Toast("ГЛУШИЛКА: тревога −12");
+                    break;
+                case "haste":
+                    _player.hasteUntil = now + 5f;
+                    _hud?.Toast("СВЕРХТАКТ: +45% скорости (5с)");
+                    break;
+                case "emp":
+                    Guard nearest = null; float bd = 999f;
+                    foreach (var g in _guards)
+                    {
+                        float d = Vector3.Distance(g.t.position, _player.transform.position);
+                        if (d < bd) { bd = d; nearest = g; }
+                    }
+                    if (nearest != null) nearest.stunUntil = now + 4f;
+                    _hud?.Toast("ЭМИ-РАЗРЯД: ближайший робот оглушён (4с)");
+                    break;
+                case "cloak":
+                    _cloakUntil = now + 4f;
+                    _hud?.Toast("СТЕЛС-ПАКЕТ: роботы тебя не видят (4с)");
+                    break;
+                case "purge":
+                    foreach (var o in _traps) if (o.t != null) Destroy(o.t.gameObject);
+                    _traps.Clear();
+                    foreach (var h in _hooks) { if (h.t != null) Destroy(h.t.gameObject); h.owner.hookOut = false; }
+                    _hooks.Clear();
+                    _hud?.Toast("ЧИСТКА: все летящие ловушки сожжены");
+                    break;
+                case "heal":
+                    if (S.myHp < S.myMaxHp)
+                    {
+                        S.myHp++;
+                        _hud?.Toast($"РОЙ: подлатал себя (+1 HP → {S.myHp}/{S.myMaxHp})");
+                    }
+                    else _hud?.Toast("HP уже полные — рой скучает");
+                    break;
+            }
+            _abilityCd = 8f - S.EvoBonus("cooldown");
+        }
+
+        public float AbilityCooldown => _abilityCd;
+
+        IEnumerator XRay(float dur)
+        {
+            var beacons = new List<GameObject>();
+            foreach (var l in _loot)
+            {
+                if (l.deposited || l.body == null) continue;
+                var b = Build.MeshBox(l.body, new Vector3(0.12f, 26f, 0.12f), Mats.Neon(new Color(1f, 0.85f, 0.4f), 2.2f), new Vector3(0, 13f, 0));
+                beacons.Add(b);
+            }
+            foreach (var g in _guards)
+            {
+                var b = Build.MeshBox(g.t, new Vector3(0.16f, 26f, 0.16f), Mats.Neon(new Color(1f, 0.3f, 0.3f), 2.2f), new Vector3(0, 13f, 0));
+                beacons.Add(b);
+            }
+            yield return new WaitForSeconds(dur);
+            foreach (var b in beacons) if (b != null) Destroy(b);
+        }
+
+        void SpawnDecoyGhost(Vector3 pos)
+        {
+            var ghost = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            Destroy(ghost.GetComponent<Collider>());
+            ghost.transform.position = pos;
+            ghost.transform.localScale = new Vector3(0.84f, 0.78f, 0.84f);
+            ghost.GetComponent<MeshRenderer>().sharedMaterial = Mats.Neon(new Color(1f, 0.7f, 0.3f), 1.4f);
+            Destroy(ghost, 5f);
+        }
+
+        void HurtPlayer(Vector3 from, int dmg)
         {
             if (_hitLock > 0f || S.myBug || _done) return;
             _hitLock = 1.2f;
-            S.myHp = Mathf.Max(S.myHp - 1, 0);
+            S.myHp = Mathf.Max(S.myHp - dmg, 0);
             S.ApplyAlarm(2f);
             DropLoot();
+            _player.SetMorph(false);
             var push = _player.transform.position - from; push.y = 0;
             _player.Impulse(push.normalized * 11f + Vector3.up * 7f);
             if (S.myHp <= 0)
             {
                 S.myBug = true;
-                _player.baseSpeed = 3.4f;
-                _player.sprintSpeed = 3.4f;
+                _player.SetBug(true);
                 _hud?.Toast("КРИТИЧЕСКИЙ СБОЙ: ты — БАГ. Ползи к порталу!");
             }
-            else _hud?.Toast($"ЛОВУШКА СИСТЕМЫ! HP −1 ({S.myHp}/{S.myMaxHp})");
+            else _hud?.Toast($"ЛОВУШКА СИСТЕМЫ! HP −{dmg} ({S.myHp}/{S.myMaxHp})");
         }
 
         void TickCarryAndDeposit()
@@ -346,9 +755,10 @@ namespace Virus.World
                     var l = _carried;
                     DropLoot();
                     l.deposited = true;
-                    S.DepositValue(l.value);
+                    float got = S.DepositValue(l.value);
                     Destroy(l.body.gameObject);
-                    _hud?.Toast($"◈ +{(int)l.value} — внесено! Добыча {(int)S.access}%");
+                    string combo = S.ComboCount > 1 ? $"  КОМБО ×{S.ComboMult:0.0} ({S.ComboCount} подряд)" : "";
+                    _hud?.Toast($"◈ +{(int)got} — внесено! Добыча {(int)S.access}%{combo}");
                     if (!S.evacOpen && S.access >= 100f) OpenEvac(false);
                 }
             }
@@ -366,8 +776,7 @@ namespace Virus.World
                     _reviveT = 0f;
                     S.myBug = false; S.myHp = 1;
                     S.ApplyAlarm(5f);
-                    _player.baseSpeed = 6f;
-                    _player.sprintSpeed = 9.2f;
+                    _player.SetBug(false);
                     _hud?.Toast("ПЕРЕЗАПУСК: 1 HP. Аккуратнее!");
                 }
             }
@@ -401,7 +810,8 @@ namespace Virus.World
         void TickSystemScreen()
         {
             if (_sysScreen == null) return;
-            _sysScreen.text = $"СИСТЕМА {S.raid.av}\nчувствительность {S.raid.sensitivity} · роботов {_guards.Count}\nтревога {(int)S.alarm}% · {S.AlarmPhaseName()}";
+            string extra = Frozen ? "\n// ЗАМОРОЖЕНА //" : Time.time < _markedUntil ? "\nЦЕЛЬ ПОМЕЧЕНА" : "";
+            _sysScreen.text = $"СИСТЕМА {S.raid.av}\nчувствительность {S.raid.sensitivity} · роботов {_guards.Count}\nтревога {(int)S.alarm}% · {S.AlarmPhaseName()}{extra}";
         }
 
         void Finish(bool victory, string reason)
@@ -427,10 +837,13 @@ namespace Virus.World
             dim.rectTransform.offsetMin = Vector2.zero; dim.rectTransform.offsetMax = Vector2.zero;
             dim.color = new Color(0, 0.01f, 0.02f, 0.88f);
 
-            MakeUiText(canvasGo.transform, victory ? "СЕРВЕР ВЗЛОМАН" : "РЕЙД ПРОВАЛЕН", new Vector2(0, 120), 44,
+            MakeUiText(canvasGo.transform, victory ? "СЕРВЕР ВЗЛОМАН" : "РЕЙД ПРОВАЛЕН", new Vector2(0, 140), 44,
                 victory ? GameData.INFECTED : new Color(1f, 0.3f, 0.4f));
-            MakeUiText(canvasGo.transform, reason, new Vector2(0, 60), 22, new Color(0.88f, 0.95f, 1f));
-            MakeUiText(canvasGo.transform, $"Вынесено ◈{S.lastDelivered} за {S.lastDeposits} ходок", new Vector2(0, 20), 20, new Color(0.6f, 0.75f, 0.85f));
+            MakeUiText(canvasGo.transform, reason, new Vector2(0, 80), 22, new Color(0.88f, 0.95f, 1f));
+            MakeUiText(canvasGo.transform, $"Вынесено ◈{S.lastDelivered} за {S.lastDeposits} ходок", new Vector2(0, 40), 20, new Color(0.6f, 0.75f, 0.85f));
+            MakeUiText(canvasGo.transform,
+                $"Карьера: {S.career["deposits"]} вносов · {S.career["tasks"]} задач · {S.career["raids"]} рейдов · ◈{S.career["delivered"]} всего",
+                new Vector2(0, 4), 17, new Color(0.55f, 0.65f, 0.75f));
 
             var btnGo = new GameObject("btn", typeof(RectTransform));
             btnGo.transform.SetParent(canvasGo.transform, false);

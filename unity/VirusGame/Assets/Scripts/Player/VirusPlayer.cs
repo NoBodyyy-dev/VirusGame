@@ -1,4 +1,5 @@
 using UnityEngine;
+using Virus.Core;
 using Virus.Util;
 
 namespace Virus.Player
@@ -21,10 +22,16 @@ namespace Virus.Player
         public bool carrying = false;
         public float baseSpeed = 6f, sprintSpeed = 9.2f;
 
-        static readonly Color ProtoColor = new(0.604f, 0.722f, 0.784f);   // ПРОТО-ШТАММ #9ab8c8
+        // статусы (метки времени Time.time): ловушки и активки
+        public float hasteUntil, slowUntil, lockedUntil;
+        public bool bug;
+        public bool Morphed { get; private set; }
+        public System.Action morphBroken;   // морф слетел от движения
 
         CharacterController _cc;
         Transform _yaw, _pitch, _cam, _model;
+        GameObject _crate;      // маскировка «ложный файл»
+        string _modelSig = "";
         Camera _camera;
         Vector3 _vel;
         float _coyoteT, _jumpBufT, _pitchDeg = -14f;
@@ -54,68 +61,80 @@ namespace Virus.Player
             _cam.SetParent(_pitch, false);
             _cam.localPosition = new Vector3(0, 0, -ArmLen);
 
-            BuildModel();
+            RebuildModel();
             Cursor.lockState = CursorLockMode.Locked;
             Cursor.visible = false;
         }
 
-        // ── скин вируса (упрощённый порт virus_models.gd: ядро, глаза, шипы) ──
-        void BuildModel()
+        // ── скин вируса: полиморфный, зависит от ветки/уровня/доп. ветки (VirusModel) ──
+        void RebuildModel()
         {
-            _model = new GameObject("Model").transform;
-            _model.SetParent(transform, false);
+            var s = GameState.I;
+            string cls = s.DisplayClass();
+            int stage = s.EvolveStage();
+            string sec = s.DisplaySecondary();
+            _modelSig = $"{cls}:{stage}:{sec}:{bug}";
 
-            var shell = Mats.Plastic(new Color(0.10f, 0.13f, 0.16f));
-            var glow = Mats.Neon(ProtoColor, 1.6f);
-            var glowSoft = Mats.Neon(ProtoColor, 0.7f);
-
-            // тело-капля
-            Prim(PrimitiveType.Sphere, _model, new Vector3(0, 0.92f, 0), new Vector3(0.92f, 1.14f, 0.92f), shell);
-            // светящееся ядро и «мембрана»
-            Prim(PrimitiveType.Sphere, _model, new Vector3(0, 1.02f, 0.14f), Vector3.one * 0.5f, glow);
-            Prim(PrimitiveType.Sphere, _model, new Vector3(0, 0.62f, 0.0f), new Vector3(0.7f, 0.42f, 0.7f), glowSoft);
-            // глаза
-            Prim(PrimitiveType.Sphere, _model, new Vector3(-0.17f, 1.24f, 0.36f), Vector3.one * 0.13f, Mats.Neon(Color.white, 2.2f));
-            Prim(PrimitiveType.Sphere, _model, new Vector3(0.17f, 1.24f, 0.36f), Vector3.one * 0.13f, Mats.Neon(Color.white, 2.2f));
-            // шипы по кругу
-            for (int i = 0; i < 6; i++)
-            {
-                float a = i * Mathf.PI * 2f / 6f;
-                var dir = new Vector3(Mathf.Cos(a), 0.35f, Mathf.Sin(a)).normalized;
-                var spike = Prim(PrimitiveType.Capsule, _model,
-                    new Vector3(0, 0.95f, 0) + dir * 0.52f, new Vector3(0.13f, 0.3f, 0.13f), shell);
-                spike.transform.up = dir;
-                // светящийся кончик
-                Prim(PrimitiveType.Sphere, _model, new Vector3(0, 0.95f, 0) + dir * 0.82f, Vector3.one * 0.09f, glowSoft);
-            }
-            // свет штамма (как OmniLight у Godot-игрока)
-            var l = new GameObject("glow").AddComponent<Light>();
-            l.transform.SetParent(_model, false);
-            l.transform.localPosition = new Vector3(0, 1.2f, 0);
-            l.type = LightType.Point;
-            l.color = ProtoColor;
-            l.intensity = 1.3f;
-            l.range = 5f;
+            var oldRot = _model != null ? _model.rotation : Quaternion.identity;
+            if (_model != null) Destroy(_model.gameObject);
+            _model = (bug
+                ? VirusModel.BuildBug(transform, GameData.CLASSES[cls].color)
+                : VirusModel.Build(transform, cls, stage, sec)).transform;
+            _model.rotation = oldRot;
+            SetLayerDeep(_model, 2);
+            if (Morphed) _model.gameObject.SetActive(false);   // не светить скин из-под маскировки
         }
 
-        static GameObject Prim(PrimitiveType t, Transform parent, Vector3 pos, Vector3 scale, Material m)
+        static void SetLayerDeep(Transform t, int layer)
         {
-            var go = GameObject.CreatePrimitive(t);
-            Object.Destroy(go.GetComponent<Collider>());   // скин не должен толкаться
-            go.layer = 2;
-            go.transform.SetParent(parent, false);
-            go.transform.localPosition = pos;
-            go.transform.localScale = scale;
-            go.GetComponent<MeshRenderer>().sharedMaterial = m;
-            return go;
+            t.gameObject.layer = layer;
+            foreach (Transform c in t) SetLayerDeep(c, layer);
+        }
+
+        // перестройка при смене ветки/уровня/сброса/бага
+        void EnsureModel()
+        {
+            var s = GameState.I;
+            string sig = $"{s.DisplayClass()}:{s.EvolveStage()}:{s.DisplaySecondary()}:{bug}";
+            if (sig != _modelSig) RebuildModel();
+        }
+
+        public void SetBug(bool on)
+        {
+            if (bug == on) return;
+            bug = on;
+            if (on) SetMorph(false);
+            RebuildModel();
+        }
+
+        // «ложный файл»: игрок выглядит как ящик, движение снимает морф
+        public void SetMorph(bool on)
+        {
+            if (Morphed == on) return;
+            Morphed = on;
+            if (on && _crate == null) _crate = VirusModel.BuildCrate(transform);
+            if (_crate != null) _crate.SetActive(on);
+            if (_model != null) _model.gameObject.SetActive(!on);
+        }
+
+        public bool Locked => Time.time < lockedUntil;
+
+        // рывок: бросок вперёд по направлению взгляда (работает даже с грузом)
+        public void Dash()
+        {
+            var d = LookDir();
+            _vel += d * 14f + Vector3.up * 2.5f;
         }
 
         void Update()
         {
+            EnsureModel();
+
             // курсор: ESC — отпустить, клик — снова захватить
-            if (Input.GetKeyDown(KeyCode.Escape))
+            if (Input.GetKeyDown(KeyCode.Escape) && !UI.EvolutionUI.IsOpen && !UI.PuzzleUI.IsOpen)
             { Cursor.lockState = CursorLockMode.None; Cursor.visible = true; }
-            else if (Input.GetMouseButtonDown(0) && Cursor.lockState != CursorLockMode.Locked)
+            else if (Input.GetMouseButtonDown(0) && Cursor.lockState != CursorLockMode.Locked
+                     && !UI.EvolutionUI.IsOpen && !UI.PuzzleUI.IsOpen)
             { Cursor.lockState = CursorLockMode.Locked; Cursor.visible = false; }
 
             bool look = controlEnabled && Cursor.lockState == CursorLockMode.Locked;
@@ -135,10 +154,11 @@ namespace Virus.Player
             _wasGrounded = grounded;
 
             _jumpBufT = Mathf.Max(_jumpBufT - Time.deltaTime, 0f);
-            if (controlEnabled && !carrying && Input.GetButtonDown("Jump")) _jumpBufT = JumpBuffer;
+            bool canAct = controlEnabled && !Locked;
+            if (canAct && !carrying && !bug && Input.GetButtonDown("Jump")) _jumpBufT = JumpBuffer;
 
             Vector3 input = Vector3.zero;
-            if (controlEnabled)
+            if (canAct)
             {
                 float h = Input.GetAxisRaw("Horizontal"), v = Input.GetAxisRaw("Vertical");
                 input = _yaw.right * h + _yaw.forward * v;
@@ -146,8 +166,19 @@ namespace Virus.Player
                 if (input.sqrMagnitude > 1f) input.Normalize();
             }
 
-            bool sprinting = controlEnabled && Input.GetKey(KeyCode.LeftShift);
-            float speed = (sprinting ? sprintSpeed : baseSpeed) * carryFactor;
+            // движение снимает «ложный файл»
+            if (Morphed && (input.sqrMagnitude > 0.01f || _jumpBufT > 0f))
+            {
+                SetMorph(false);
+                morphBroken?.Invoke();
+            }
+
+            bool sprinting = canAct && Input.GetKey(KeyCode.LeftShift) && !bug;
+            // скорость: эволюция растит базу, червь быстрее всех; статусы ловушек/активок
+            float evo = GameState.I.EvoBonus("speed") + (GameState.I.HasPassive("worm") ? 0.9f : 0f);
+            float speed = bug ? 3.4f : ((sprinting ? sprintSpeed : baseSpeed) + evo) * carryFactor;
+            if (Time.time < hasteUntil) speed *= 1.45f;
+            if (Time.time < slowUntil) speed *= 0.55f;
             float accel = grounded ? AccelGround : AccelAir;
             _vel.x = Mathf.MoveTowards(_vel.x, input.x * speed, accel * Time.deltaTime);
             _vel.z = Mathf.MoveTowards(_vel.z, input.z * speed, accel * Time.deltaTime);

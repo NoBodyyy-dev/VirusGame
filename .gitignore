@@ -2,3 +2,9 @@
 VIRUS.exe
 VIRUS.tmp
 *.tmp
+
+# артефакты dotnet-верификации (unity/_verify*, offline-проверка компиляции)
+unity/_verify/bin/
+unity/_verify/obj/
+unity/_verify_full/bin/
+unity/_verify_full/obj/

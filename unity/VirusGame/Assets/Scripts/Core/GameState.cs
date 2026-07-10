@@ -29,9 +29,18 @@ namespace Virus.Core
         public string secondaryBranch = "";
         public int virusLevel = 0;
         public readonly List<string> activeAbilities = new();
+        public readonly List<string> stolenAbilities = new();
+        public float resetUntil = 0f;    // «сброс до нуля»: до этого времени скин голый
+        public float now = 0f;           // игровые часы ядра (двигает Tick)
+
+        // карьерные счётчики — открывают умения по глубине ветки
+        public readonly Dictionary<string, int> career = new()
+            { {"deposits",0}, {"delivered",0}, {"tasks",0}, {"raids",0} };
 
         public readonly Dictionary<string, int> resources = new()
             { {"data_fragments",0}, {"code_samples",0}, {"mutagen",0}, {"ghost_tokens",0} };
+
+        readonly System.Random _rng = new();
 
         // ── Грид ──
         public readonly List<ServerNode> gridNodes = new();
@@ -49,6 +58,8 @@ namespace Virus.Core
             public string name, theme, av;
             public int tier, quota, files, crates, sensitivity, seed;
             public float trapInterval, camRange, creep;
+            public int assist;          // вспомогательный взлом: заражённые серверы зоны
+            public float assistK;       // их суммарная помощь (0..~0.35)
         }
 
         public RaidConfig raid;
@@ -61,11 +72,184 @@ namespace Virus.Core
         // итоги последнего рейда (для результатов и статистики)
         public int lastDelivered, lastDeposits;
 
+        // ── идентичность штамма ──
+        // скин ветки появляется только с УР.1; «сброс до нуля» временно оголяет
+        public string DisplayClass() =>
+            now < resetUntil ? "base" : (branch != "" && virusLevel >= 1 ? branch : "base");
+
+        public string DisplaySecondary() => virusLevel >= 3 ? secondaryBranch : "";
+
+        public ClassInfo MyClassInfo() => GameData.CLASSES[DisplayClass()];
+
+        public bool HasPassive(string cls)
+        {
+            if (virusLevel < 1) return false;
+            return branch == cls || (virusLevel >= 3 && secondaryBranch == cls);
+        }
+
+        // ── дерево эволюции: ветка и уровни ──
+        public bool ChooseBranch(string cls)
+        {
+            if (branch != "" || !GameData.CLASSES.ContainsKey(cls) || cls == "base") return false;
+            branch = cls;
+            EvolutionChanged?.Invoke();
+            return true;
+        }
+
+        public bool ChooseSecondary(string cls)
+        {
+            if (virusLevel < 3 || secondaryBranch != "" || cls == branch ||
+                !GameData.CLASSES.ContainsKey(cls) || cls == "base") return false;
+            secondaryBranch = cls;
+            EvolutionChanged?.Invoke();
+            return true;
+        }
+
+        public Dictionary<string, int> LevelCost(int lvl) =>
+            GameData.LEVELS[Mathf.Clamp(lvl, 0, 3)].cost;
+
+        public bool CanLevelUp()
+        {
+            if (virusLevel >= 3 || branch == "") return false;   // сперва выбери направленность
+            foreach (var kv in LevelCost(virusLevel + 1))
+                if (resources.GetValueOrDefault(kv.Key, 0) < kv.Value) return false;
+            return true;
+        }
+
+        public bool LevelUp()
+        {
+            if (!CanLevelUp()) return false;
+            foreach (var kv in LevelCost(virusLevel + 1)) resources[kv.Key] -= kv.Value;
+            virusLevel++;
+            if (virusLevel == 1)
+            {
+                // сигнатурная активка ветки выдаётся бесплатно
+                var sig = GameData.BRANCH_ABILITIES[branch][0];
+                if (!activeAbilities.Contains(sig)) activeAbilities.Add(sig);
+            }
+            EvolutionChanged?.Invoke();
+            return true;
+        }
+
+        // ── активки: слоты, пул, задания ──
+        public int MaxAbilitySlots() => new[] { 0, 1, 2, 3 }[Mathf.Clamp(virusLevel, 0, 3)];
+
+        public List<string> AbilityPool()
+        {
+            // УР.3 с доп. веткой расширяет выбор её умениями
+            var pool = new List<string>();
+            if (branch == "") return pool;
+            pool.AddRange(GameData.BRANCH_ABILITIES[branch]);
+            if (DisplaySecondary() != "")
+                foreach (var id in GameData.BRANCH_ABILITIES[secondaryBranch])
+                    if (!pool.Contains(id)) pool.Add(id);
+            return pool;
+        }
+
+        public int AbilityDepth(string id)
+        {
+            // глубина умения в ветке (0 = сигнатурное); для доп. ветки — её глубина
+            int d = 99;
+            foreach (var cls in new[] { branch, secondaryBranch })
+            {
+                if (cls == "" || !GameData.BRANCH_ABILITIES.TryGetValue(cls, out var arr)) continue;
+                int idx = System.Array.IndexOf(arr, id);
+                if (idx >= 0) d = Mathf.Min(d, idx);
+            }
+            return d;
+        }
+
+        public bool AbilityTaskDone(int depth)
+        {
+            if (depth <= 0) return true;
+            if (!GameData.ABILITY_TASKS.TryGetValue(depth, out var t)) return false;
+            return career.GetValueOrDefault(t.key, 0) >= t.need;
+        }
+
+        public string AbilityTaskProgress(int depth)
+        {
+            if (depth <= 0 || !GameData.ABILITY_TASKS.TryGetValue(depth, out var t)) return "";
+            return $"{t.desc} ({Mathf.Min(career.GetValueOrDefault(t.key, 0), t.need)}/{t.need})";
+        }
+
+        public bool CanPickAbility(string id)
+        {
+            if (activeAbilities.Contains(id) || !AbilityPool().Contains(id)) return false;
+            if (activeAbilities.Count >= MaxAbilitySlots()) return false;
+            return AbilityTaskDone(AbilityDepth(id));
+        }
+
+        public bool PickAbility(string id)
+        {
+            if (!CanPickAbility(id)) return false;
+            activeAbilities.Add(id);
+            EvolutionChanged?.Invoke();
+            return true;
+        }
+
+        // откат: снять умение со слота (вернуть можно в любой момент бесплатно)
+        public bool UnequipAbility(string id)
+        {
+            if (!activeAbilities.Remove(id)) return false;
+            EvolutionChanged?.Invoke();
+            return true;
+        }
+
+        public float AbilityCost(string id) =>
+            GameData.ABILITIES[id].cost * (virusLevel >= 3 ? GameData.APEX_COST_MULT : 1f);
+
+        public bool TrySpendBandwidth(float cost)
+        {
+            if (bandwidth < cost) return false;
+            bandwidth -= cost;
+            return true;
+        }
+
+        // перепрошивка: крадёт умение (глубина 1 — 80%, 2 — 18%, 3 — 2%)
+        public string StealAbility()
+        {
+            if (activeAbilities.Count == 0) return "";
+            double r = _rng.NextDouble();
+            int idx = r >= 0.98 ? 2 : r >= 0.80 ? 1 : 0;
+            idx = Mathf.Min(idx, activeAbilities.Count - 1);
+            var id = activeAbilities[idx];
+            activeAbilities.RemoveAt(idx);
+            stolenAbilities.Add(id);
+            EvolutionChanged?.Invoke();
+            return id;
+        }
+
+        // ── базовые навыки растут с уровнем ──
+        public float EvoBonus(string id)
+        {
+            float lvl = virusLevel;
+            return id switch
+            {
+                "bw"       => lvl * 15f,
+                "stealth"  => lvl * 0.08f,
+                "vitality" => virusLevel >= 2 ? 1f : 0f,
+                "speed"    => lvl * 0.35f,
+                "cooldown" => lvl * 0.8f,
+                _ => 0f,
+            };
+        }
+
+        public int EvolveStage() => virusLevel;   // стадия скина = уровень штамма
+
+        public void CareerEvent(string key, int amount = 1)
+        {
+            career[key] = career.GetValueOrDefault(key, 0) + amount;
+            EvolutionChanged?.Invoke();
+        }
+
         // ── кампания ──
         public void NewCampaign()
         {
             branch = ""; secondaryBranch = ""; virusLevel = 0;
             activeAbilities.Clear();
+            stolenAbilities.Clear();
+            resetUntil = 0f;
+            foreach (var k in new List<string>(career.Keys)) career[k] = 0;
             foreach (var k in new List<string>(resources.Keys)) resources[k] = 0;
             gridFlags.Clear(); blockPositions.Clear();
             gridHeat = 0f; campaignWon = false; oracleCoreDown = false;
@@ -186,16 +370,30 @@ namespace Virus.Core
             currentNode = n;
             access = 0f;
             alarm = gridHeat * 0.3f;
-            maxBandwidth = 100f; bandwidth = maxBandwidth; bwRegen = 4f;
-            myMaxHp = 3; myHp = myMaxHp; myBug = false;
+            // пассивки и эволюция: botnet — BW 150 и двойная регенерация;
+            // ransomware — +1 HP; УР.2+ — +1 HP; уровень растит BW
+            maxBandwidth = (HasPassive("botnet") ? 150f : 100f) + EvoBonus("bw");
+            bandwidth = maxBandwidth;
+            bwRegen = HasPassive("botnet") ? 8f : 4f;
+            myMaxHp = 3 + (int)EvoBonus("vitality") + (HasPassive("ransomware") ? 1 : 0);
+            myHp = myMaxHp; myBug = false;
             evacOpen = false; wipeForced = false; evacLeft = 0f;
             lastDelivered = 0; lastDeposits = 0;
+            _comboCount = 0; _comboUntil = 0f;
             var t = GameData.TIERS[n.tier];
+            // вспомогательный взлом: уже взломанные серверы этой зоны помогают —
+            // ниже стартовая тревога, реже ловушки. Botnet-оператор удваивает эффект.
+            int assist = 0;
+            foreach (var g in gridNodes)
+                if (g.zone == n.zone && g.infected) assist++;
+            float assistK = Mathf.Min(assist * (HasPassive("botnet") ? 0.06f : 0.03f), 0.35f);
+            alarm *= 1f - assistK;
             raid = new RaidConfig {
                 name = n.name, tier = n.tier, theme = t.theme, av = n.av,
                 quota = t.quota, files = t.files, crates = t.crates,
-                sensitivity = t.sensitivity, trapInterval = t.trapInterval,
-                camRange = t.camRange, creep = t.creep, seed = n.seed,
+                sensitivity = t.sensitivity, trapInterval = t.trapInterval * (1f + assistK),
+                camRange = t.camRange, creep = t.creep * (1f - assistK * 0.5f), seed = n.seed,
+                assist = assist, assistK = assistK,
             };
         }
 
@@ -204,17 +402,36 @@ namespace Virus.Core
         public string AlarmPhaseName() => new[] { "SLEEP", "SCAN", "PURGE", "WIPE" }[AlarmPhase()];
         public void ApplyAlarm(float amount) => alarm = Mathf.Clamp(alarm + amount, 0f, 100f);
 
-        // лут внесён в портал
-        public void DepositValue(float v)
+        // комбо-серия: вносы подряд (окно 20с) множат ценность — стая, не тормози!
+        int _comboCount;
+        float _comboUntil;
+        public int ComboCount => _comboCount;
+        public float ComboMult => Mathf.Min(1f + 0.1f * Mathf.Max(_comboCount - 1, 0), 1.5f);
+
+        // лут внесён в портал; возвращает фактически зачтённую ценность (с комбо)
+        public float DepositValue(float v)
         {
-            access = Mathf.Min(access + v / Mathf.Max(raid?.quota ?? 100, 1) * 100f, 999f);
-            lastDelivered += (int)v;
+            _comboCount = now < _comboUntil ? _comboCount + 1 : 1;
+            _comboUntil = now + 20f;
+            float boosted = v * ComboMult;
+            access = Mathf.Min(access + boosted / Mathf.Max(raid?.quota ?? 100, 1) * 100f, 999f);
+            lastDelivered += (int)boosted;
             lastDeposits++;
+            career["deposits"]++;
+            career["delivered"] += (int)boosted;
+            return boosted;
         }
 
         public void FinishHack(bool victory)
         {
             if (currentNode == null) return;
+            // украденное перепрошивкой возвращается после рейда
+            foreach (var id in stolenAbilities)
+                if (!activeAbilities.Contains(id) && activeAbilities.Count < 3)
+                    activeAbilities.Add(id);
+            stolenAbilities.Clear();
+            resetUntil = 0f;
+            career["raids"]++;   // карьерные счётчики — топливо заданий на активки
             if (victory)
             {
                 currentNode.infected = true;
@@ -235,6 +452,7 @@ namespace Virus.Core
 
         public void Tick(float dt)
         {
+            now += dt;
             if (bandwidth < maxBandwidth) bandwidth = Mathf.Min(bandwidth + bwRegen * dt, maxBandwidth);
             if (gridHeat > 0f) gridHeat = Mathf.Max(gridHeat - dt * 1.5f, 0f);
         }

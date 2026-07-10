@@ -72,6 +72,10 @@ namespace Virus.World
 
         void Update()
         {
+            // дерево эволюции: Tab открывает/закрывает (закрытие — внутри UI)
+            if (Input.GetKeyDown(KeyCode.Tab) && !UI.PuzzleUI.IsOpen && !UI.EvolutionUI.IsOpen)
+                UI.EvolutionUI.Toggle();
+
             _knockLock = Mathf.Max(_knockLock - Time.deltaTime, 0f);
             TickLifts();
             TickBeams();
@@ -89,8 +93,8 @@ namespace Virus.World
             if (_hud == null) return;
             if (S.oracleCoreDown) _hud.SetObjective("ЯДРО РАЗРУШЕНО — беги к порталу эвакуации!");
             else if (S.RedAlert()) _hud.SetObjective("28/28! Путь к ОРАКУЛУ открыт — реши 15 головоломок и захвати зал");
-            else if (!S.ZoneComplete(0)) _hud.SetObjective("ОБУЧЕНИЕ: захвати 3 сервера и открой дверь на 1 уровень");
-            else _hud.SetObjective($"Захвати все серверы этапа — туннель дальше откроется ({S.FacilityInfected()}/28)");
+            else if (!S.ZoneComplete(0)) _hud.SetObjective("ОБУЧЕНИЕ: захвати 3 сервера и открой дверь на 1 уровень · [Tab] — дерево эволюции");
+            else _hud.SetObjective($"Захвати все серверы этапа — туннель дальше откроется ({S.FacilityInfected()}/28) · [Tab] — эволюция");
         }
 
         // ── окружение (ночной город) ──

@@ -35,8 +35,144 @@ namespace Virus.Core
         public string[] traps;
     }
 
+    // ── дерево эволюции: классы, умения, уровни (порт game_state.gd) ──
+    public class ClassInfo
+    {
+        public string name, role, passive, active;
+        public Color color;
+        public int cost, str, dex, intel;
+    }
+
+    public class AbilityInfo
+    {
+        public string name, desc;
+        public int cost;
+    }
+
+    public class AbilityTask
+    {
+        public string desc, key;
+        public int need;
+    }
+
+    public class LevelInfo
+    {
+        public string title, perks;
+        public Dictionary<string, int> cost;
+    }
+
+    public class TrapInfo
+    {
+        public string name;
+        public int tier;
+        public float speed, life;
+        public Color color;
+    }
+
     public static class GameData
     {
+        // ── классы: "base" — общий старт, остальные — ветки дерева ──
+        public static readonly Dictionary<string, ClassInfo> CLASSES = new()
+        {
+            ["base"] = new ClassInfo { name = "ПРОТО-ШТАММ", role = "Болванка без специализации",
+                color = new Color(0.604f, 0.722f, 0.784f), cost = 0, str = 4, dex = 4, intel = 4,
+                passive = "Все начинают одинаково. Ветку развития выбирают в дереве эволюции [Tab]",
+                active = "—" },
+            ["trojan"] = new ClassInfo { name = "ТРОЯН", role = "Мимик / диверсант",
+                color = new Color(0.208f, 0.878f, 1f), cost = 20, str = 4, dex = 7, intel = 9,
+                passive = "Мимикрия: активка превращает его в ящик — роботы его не видят, пока он не двинется",
+                active = "Ложный файл — стать ящиком (до первого движения)" },
+            ["worm"] = new ClassInfo { name = "ЧЕРВЬ", role = "Спринтер / курьер",
+                color = new Color(0.220f, 0.941f, 0.659f), cost = 15, str = 3, dex = 10, intel = 5,
+                passive = "Самый быстрый штамм; штраф от груза меньше",
+                active = "Рывок — бросок вперёд (работает даже с грузом)" },
+            ["ransomware"] = new ClassInfo { name = "RANSOMWARE", role = "Силач / танк",
+                color = new Color(1f, 0.239f, 0.431f), cost = 35, str = 10, dex = 3, intel = 6,
+                passive = "Тяжёлый лут тащит В ОДИНОЧКУ; +1 HP",
+                active = "Шифрование — заморозка всех ловушек и робота на 3с" },
+            ["spyware"] = new ClassInfo { name = "SPYWARE", role = "Разведчик / глаза",
+                color = new Color(1f, 0.706f, 0.329f), cost = 20, str = 3, dex = 6, intel = 10,
+                passive = "Видит радиусы обзора роботов-охранников и полную сводку системы",
+                active = "Скан — лут и угрозы видны сквозь стены (6с) всем" },
+            ["adware"] = new ClassInfo { name = "ADWARE", role = "Дезинформация",
+                color = new Color(0.659f, 0.847f, 0.310f), cost = 25, str = 4, dex = 6, intel = 8,
+                passive = "Ловушки иногда ведутся на его фантомный след и промахиваются",
+                active = "Фантом — приманка уводит ловушки (5с)" },
+            ["rootkit"] = new ClassInfo { name = "ROOTKIT", role = "Тихоня / сапёр",
+                color = new Color(0.545f, 0.361f, 1f), cost = 30, str = 5, dex = 8, intel = 7,
+                passive = "Бесшумный: его бег, прыжки и броски не поднимают тревогу",
+                active = "Глушилка — тревога −12" },
+            ["botnet"] = new ClassInfo { name = "BOTNET", role = "Оператор роя / медик",
+                color = new Color(0.290f, 0.565f, 1f), cost = 40, str = 6, dex = 4, intel = 9,
+                passive = "Bandwidth 150, двойная регенерация. Настраивает ВСПОМОГАТЕЛЬНЫЙ ВЗЛОМ: взломанные серверы зоны помогают вдвое сильнее",
+                active = "Дефибрилляция — оживить «бага» рядом (или +1 HP себе)" },
+        };
+
+        // ── активные умения (общий пул) ──
+        public static readonly Dictionary<string, AbilityInfo> ABILITIES = new()
+        {
+            ["dash"]   = new AbilityInfo { name = "РЫВОК", desc = "бросок вперёд (работает даже с грузом)", cost = 15 },
+            ["morph"]  = new AbilityInfo { name = "ЛОЖНЫЙ ФАЙЛ", desc = "стать ящиком — роботы слепы, пока не двинешься", cost = 20 },
+            ["freeze"] = new AbilityInfo { name = "ШИФРОВАНИЕ", desc = "заморозка системы, ловушек и роботов на 3с", cost = 35 },
+            ["xray"]   = new AbilityInfo { name = "СКАН", desc = "лут и угрозы видны сквозь стены (6с) всем", cost = 20 },
+            ["decoy"]  = new AbilityInfo { name = "ФАНТОМ", desc = "приманка уводит ловушки (5с)", cost = 25 },
+            ["jam"]    = new AbilityInfo { name = "ГЛУШИЛКА", desc = "тревога −12", cost = 30 },
+            ["heal"]   = new AbilityInfo { name = "ДЕФИБРИЛЛЯЦИЯ", desc = "оживить бага рядом (или +1 HP себе)", cost = 40 },
+            ["haste"]  = new AbilityInfo { name = "СВЕРХТАКТ", desc = "разгон себя +45% скорости на 5с", cost = 20 },
+            ["emp"]    = new AbilityInfo { name = "ЭМИ-РАЗРЯД", desc = "оглушить ближайшего робота на 4с", cost = 25 },
+            ["cloak"]  = new AbilityInfo { name = "СТЕЛС-ПАКЕТ", desc = "невидим для роботов 4с (движение не выдаёт)", cost = 30 },
+            ["purge"]  = new AbilityInfo { name = "ЧИСТКА", desc = "сжечь ВСЕ летящие ловушки системы", cost = 30 },
+        };
+
+        // ветка = 5 умений: сигнатурное на УР.1, дальше — по карьерным заданиям.
+        // полный набор открывается примерно к началу зоны T3
+        public static readonly Dictionary<string, string[]> BRANCH_ABILITIES = new()
+        {
+            ["trojan"]     = new[] { "morph", "cloak", "decoy", "xray", "purge" },
+            ["worm"]       = new[] { "dash", "haste", "decoy", "jam", "purge" },
+            ["ransomware"] = new[] { "freeze", "emp", "heal", "jam", "haste" },
+            ["spyware"]    = new[] { "xray", "jam", "cloak", "decoy", "emp" },
+            ["adware"]     = new[] { "decoy", "morph", "freeze", "haste", "purge" },
+            ["rootkit"]    = new[] { "jam", "cloak", "morph", "xray", "emp" },
+            ["botnet"]     = new[] { "heal", "purge", "freeze", "dash", "emp" },
+        };
+
+        // разблокировка умений по ГЛУБИНЕ в ветке (карьерные счётчики);
+        // глубина 0 — сигнатурное, даётся с УР.1
+        public static readonly Dictionary<int, AbilityTask> ABILITY_TASKS = new()
+        {
+            [1] = new AbilityTask { desc = "внеси 6 предметов в портал", key = "deposits", need = 6 },
+            [2] = new AbilityTask { desc = "выполни 4 полевые задачи", key = "tasks", need = 4 },
+            [3] = new AbilityTask { desc = "переживи 8 рейдов", key = "raids", need = 8 },
+            [4] = new AbilityTask { desc = "вынеси добычи на ◈350 суммарно", key = "delivered", need = 350 },
+        };
+
+        // ── уровни развития штамма 0..3 ──
+        public static readonly LevelInfo[] LEVELS =
+        {
+            new LevelInfo { title = "УР.0 · ПРОТО", cost = new Dictionary<string, int>(),
+                perks = "базовые навыки: бег, прыжок, переноска" },
+            new LevelInfo { title = "УР.1 · СПЕЦИАЛИЗАЦИЯ", cost = new Dictionary<string, int> { ["data_fragments"] = 60 },
+                perks = "скин ветки · пассивка · 1-я активка · +навыки" },
+            new LevelInfo { title = "УР.2 · МУТАЦИЯ", cost = new Dictionary<string, int> { ["data_fragments"] = 150, ["code_samples"] = 1 },
+                perks = "+1 HP · до 2 активок (за задания) · продвинутый скин" },
+            new LevelInfo { title = "УР.3 · АПЕКС", cost = new Dictionary<string, int> { ["data_fragments"] = 280, ["code_samples"] = 2, ["mutagen"] = 1 },
+                perks = "3 активки · доп. ветка · финальный скин · расход BW ×1.5" },
+        };
+
+        public const float APEX_COST_MULT = 1.5f;   // УР.3: навыки мощнее — «мана» дороже
+
+        // ── ловушки системы (вылетают из стен) ──
+        public static readonly Dictionary<string, TrapInfo> TRAPS = new()
+        {
+            ["laser"]   = new TrapInfo { name = "ТОЧЕЧНЫЙ ЛАЗЕР", tier = 0, speed = 8.5f, life = 12f, color = new Color(1f, 0.25f, 0.3f) },
+            ["cage"]    = new TrapInfo { name = "КЛЕТКА", tier = 1, speed = 6f, life = 10f, color = new Color(0.5f, 0.75f, 1f) },
+            ["reset"]   = new TrapInfo { name = "СБРОС ДО НУЛЯ", tier = 1, speed = 6.5f, life = 10f, color = new Color(0.7f, 0.7f, 0.75f) },
+            ["pull"]    = new TrapInfo { name = "ПРИТЯЖЕНИЕ", tier = 1, speed = 7f, life = 10f, color = new Color(0.9f, 0.5f, 1f) },
+            ["mark"]    = new TrapInfo { name = "МЕТКА", tier = 2, speed = 7f, life = 10f, color = new Color(1f, 0.85f, 0.3f) },
+            ["reflash"] = new TrapInfo { name = "ПАТРОН С ПЕРЕПРОШИВКОЙ", tier = 3, speed = 5.5f, life = 14f, color = new Color(0.3f, 1f, 0.6f) },
+        };
+
         // ── тиры узлов (T0 обучающий → T3 военные) ──
         public static readonly Tier[] TIERS =
         {
