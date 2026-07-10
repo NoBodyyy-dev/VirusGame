@@ -71,6 +71,16 @@ namespace Virus.App
 
             // отладочный автозапуск сцен (аналог autostart-аргументов Godot)
             var args = System.Environment.GetCommandLineArgs();
+            if (System.Array.IndexOf(args, "-host") >= 0)
+            { GameState.I.NewCampaign(); Net.NetManager.StartHost(); SceneFlow.GoGrid(); return; }
+            int joinAt = System.Array.IndexOf(args, "-join");
+            if (joinAt >= 0)
+            {
+                GameState.I.NewCampaign();
+                Net.NetManager.StartClient(joinAt + 1 < args.Length ? args[joinAt + 1] : "127.0.0.1");
+                SceneFlow.GoGrid();
+                return;
+            }
             if (System.Array.IndexOf(args, "-autogrid") >= 0)
             { GameState.I.NewCampaign(); SceneFlow.GoGrid(); return; }
             if (System.Array.IndexOf(args, "-autoraid") >= 0)
@@ -110,9 +120,21 @@ namespace Virus.App
                 GameState.I.NewCampaign();
                 SceneFlow.GoGrid();
             });
+            Btn(canvasGo.transform, "КООП: СОЗДАТЬ СТАЮ (LAN)", new Vector2(0, -95), () =>
+            {
+                GameState.I.NewCampaign();
+                Net.NetManager.StartHost();
+                SceneFlow.GoGrid();
+            });
+            Btn(canvasGo.transform, "КООП: ВОЙТИ (localhost / -join <ip>)", new Vector2(0, -160), () =>
+            {
+                GameState.I.NewCampaign();
+                Net.NetManager.StartClient("127.0.0.1");
+                SceneFlow.GoGrid();
+            });
             if (GameState.I.gridNodes.Count > 0 && GameState.I.InfectedTotal() > 0 && !GameState.I.campaignWon)
-                Btn(canvasGo.transform, "ПРОДОЛЖИТЬ", new Vector2(0, -100), SceneFlow.GoGrid);
-            Btn(canvasGo.transform, "ВЫХОД", new Vector2(0, -170), Application.Quit);
+                Btn(canvasGo.transform, "ПРОДОЛЖИТЬ", new Vector2(0, -225), SceneFlow.GoGrid);
+            Btn(canvasGo.transform, "ВЫХОД", new Vector2(0, -290), Application.Quit);
         }
 
         static void T(Transform parent, string s, Vector2 pos, int size, Color c)

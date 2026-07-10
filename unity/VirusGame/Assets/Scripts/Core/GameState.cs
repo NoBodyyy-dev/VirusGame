@@ -19,10 +19,26 @@ namespace Virus.Core
     {
         public static GameState I { get; private set; } = new GameState();
 
-        // Хуки для коопа (в одиночке null). SendFlag рассылает выставленный флаг.
+        // Хуки для коопа (в одиночке null): рассылка флага и захвата узла.
         public Action<string> SendFlag;
+        public Action<int> SendNodeInfected;
 
         public event Action EvolutionChanged;
+
+        // ── применение сетевых событий (без эха обратно в сеть) ──
+        public void ApplyRemoteFlag(string key)
+        {
+            gridFlags[key] = true;
+        }
+
+        public void ApplyRemoteNode(int id)
+        {
+            if (id < 0 || id >= gridNodes.Count) return;
+            if (gridNodes[id].infected) return;
+            gridNodes[id].infected = true;
+            gridNodes[id].failed = false;
+            EvolutionChanged?.Invoke();
+        }
 
         // ── прогрессия ──
         public string branch = "";
@@ -436,6 +452,7 @@ namespace Virus.Core
             {
                 currentNode.infected = true;
                 currentNode.failed = false;
+                SendNodeInfected?.Invoke(currentNode.id);   // кооп: стая видит захват
                 gridHeat = Mathf.Max(gridHeat - 10f, 0f);
                 resources["data_fragments"] += Mathf.Max((int)(lastDelivered * (1.1f + 0.35f * currentNode.tier)), 8);
                 if (currentNode.tier >= 2) resources["mutagen"] += 1;

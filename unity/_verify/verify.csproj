@@ -13,5 +13,6 @@
     <Compile Include="..\VirusGame\Assets\Scripts\Core\GameData.cs" />
     <Compile Include="..\VirusGame\Assets\Scripts\Core\GameState.cs" />
     <Compile Include="..\VirusGame\Assets\Scripts\Core\EvolutionTree.cs" />
+    <Compile Include="..\VirusGame\Assets\Scripts\Core\NetSync.cs" />
   </ItemGroup>
 </Project>

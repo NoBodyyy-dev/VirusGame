@@ -101,6 +101,41 @@ static class SelfTest
         }
         Check(done > 5 && locked > 10, "дерево показывает прогресс и запертые спицы");
 
+        // ── кооп-протокол: фреймер и синхронизация ──
+        var framer = new NetFramer();
+        var packed = NetFramer.Pack("FLAG|door:d_tut");
+        var half1 = new byte[3];
+        Array.Copy(packed, half1, 3);
+        var half2 = new byte[packed.Length - 3];
+        Array.Copy(packed, 3, half2, 0, half2.Length);
+        var got = framer.Feed(half1, half1.Length);
+        Check(got.Count == 0, "фреймер ждёт конца строки");
+        got = framer.Feed(half2, half2.Length);
+        Check(got.Count == 1 && got[0] == "FLAG|door:d_tut", "фреймер склеил рваные чанки");
+
+        // хост: состояние → снапшот → чистый клиент
+        var host = s;   // текущее состояние богатое: флаги/узлы уже есть
+        host.SetFlag("lever:s2a");
+        host.gridNodes[3].infected = true;
+        string snap = NetSync.MsgSnapshot(host);
+        var client = new GameState();
+        client.NewCampaign();
+        NetSync.ApplySnapshot(client, NetSync.Parse(snap));
+        Check(client.Flag("lever:s2a"), "снапшот донёс флаг");
+        Check(client.gridNodes[3].infected, "снапшот донёс захваченный узел");
+
+        // живые события: флаг и узел применяются без эха
+        bool echoed = false;
+        client.SendFlag += _ => echoed = true;
+        NetSync.ApplyFlag(client, NetSync.Parse(NetSync.MsgFlag("gen:g1")));
+        NetSync.ApplyNode(client, NetSync.Parse(NetSync.MsgNode(5)));
+        Check(client.Flag("gen:g1") && client.gridNodes[5].infected, "живые FLAG/NODE применились");
+        Check(!echoed, "удалённые события не эхуются обратно в сеть");
+
+        // позиция ходит туда-обратно
+        var pos = NetSync.Parse(NetSync.MsgPos(2, "raid:7", 1.5f, 0f, -3.25f, 90f));
+        Check(pos[0] == "POS" && pos[1] == "2" && pos[2] == "raid:7", "POS кодируется/парсится");
+
         Console.WriteLine(_fails == 0
             ? "SELFTEST OK — все проверки ядра прошли"
             : $"SELFTEST: {_fails} провалов");
