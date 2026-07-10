@@ -168,7 +168,12 @@ namespace Virus.UI
             var mp = MouseLocal();
             _hoverId = PickNode(mp);
             if (Input.GetMouseButtonDown(0) && _hoverId >= 0)
-                _tree.Click(_tree.nodes[_hoverId]);
+            {
+                var res = _tree.Click(_tree.nodes[_hoverId]);
+                Sfx.Play(res == TreeClickResult.Upgraded ? "win"
+                    : res == TreeClickResult.Unequipped ? "deposit" : "ui",
+                    res == TreeClickResult.Upgraded ? 0.35f : 0.25f);
+            }
 
             _graphic.SetVerticesDirty();
             UpdateTexts(mp);

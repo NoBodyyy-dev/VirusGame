@@ -169,6 +169,7 @@ namespace Virus.UI
                     _phase = "done";
                     _status.text = "// ДОСТУП РАЗРЕШЁН //";
                     _status.color = new Color(0.16f, 0.95f, 0.75f);
+                    Sfx.Play("win", 0.35f);
                     StartCoroutine(CloseSoon());
                 }
             }

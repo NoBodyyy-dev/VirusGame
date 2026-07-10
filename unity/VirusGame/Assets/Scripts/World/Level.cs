@@ -29,7 +29,7 @@ namespace Virus.World
         readonly List<Loot> _loot = new();
         Loot _carried;
 
-        class Trap { public Transform t; public string kind; public float life, speed; }
+        class Trap { public Transform t; public string kind; public float life, speed; public Vector3 aim; }
         readonly List<Trap> _traps = new();
 
         class Guard { public Transform t; public Vector3 home; public float meleeCd, hookCd, stunUntil; public bool hookOut; }
@@ -275,40 +275,178 @@ namespace Virus.World
                 // дуло крюка
                 Build.MeshBox(root, new Vector3(0.2f, 0.2f, 0.6f), Mats.Metal(new Color(0.35f, 0.38f, 0.42f), 0.6f), new Vector3(0, 1.9f, 0.75f));
                 Build.Omni(root, new Vector3(0, 2.6f, 0), new Color(1f, 0.25f, 0.2f), 1.4f, 9f);
+                // пассивка spyware: радиус обзора робота виден кольцом на полу
+                if (S.HasPassive("spyware"))
+                {
+                    float rr = S.raid.camRange * 1.4f;
+                    for (int k = 0; k < 24; k++)
+                    {
+                        float a = Mathf.PI * 2f * k / 24f;
+                        Build.MeshBox(root, new Vector3(0.3f, 0.04f, 0.3f), Mats.Neon(new Color(1f, 0.6f, 0.25f), 1.1f),
+                            new Vector3(Mathf.Cos(a) * rr, 0.06f, Mathf.Sin(a) * rr));
+                    }
+                }
                 _guards.Add(new Guard { t = root, home = corners[i], hookCd = (float)_rng.NextDouble() * 4f + 4f });
             }
         }
 
-        // полевые кооп-задачи: сервисные консоли — подержи [E], собьёшь тревогу
+        // ── полевые кооп-задачи (вдвоём легко, одному — мучение) ──
+        // тир 0: консоль; тир 1+: двойной рубильник; тир 2+: протяжка кабеля
         void SpawnFieldTasks()
         {
-            float hx = _hallW * 0.5f, hz = _hallD * 0.5f;
             int n = GameData.TIERS[S.raid.tier].tasks;
-            for (int i = 0; i < n; i++)
+            if (n >= 1) SpawnConsoleTask();
+            if (n >= 2) SpawnDualLeverTask();
+            if (n >= 3) SpawnCableTask();
+        }
+
+        Vector3 TaskSpot(float margin)
+        {
+            float hx = _hallW * 0.5f, hz = _hallD * 0.5f;
+            var pos = new Vector3(R(-hx + margin, hx - margin), 0, R(-hz + margin, hz - margin));
+            if (Vector3.Distance(pos, PadPos) < 9f) pos.x = Mathf.Abs(pos.x);
+            return pos;
+        }
+
+        void TaskDone(string msg)
+        {
+            S.ApplyAlarm(-8f);
+            S.CareerEvent("tasks");
+            Sfx.Play("win", 0.3f);
+            _hud?.Toast(msg + " · тревога −8, карьера +1 задача");
+        }
+
+        void SpawnConsoleTask()
+        {
+            var root = new GameObject("task_console").transform;
+            root.SetParent(transform, false);
+            root.localPosition = TaskSpot(7f);
+            Build.Solid(root, new Vector3(1.1f, 1.3f, 0.7f), Mats.Plastic(new Color(0.14f, 0.2f, 0.26f)), new Vector3(0, 0.65f, 0));
+            var led = Build.MeshBox(root, new Vector3(0.8f, 0.5f, 0.06f), Mats.Neon(new Color(1f, 0.7f, 0.35f), 1.6f), new Vector3(0, 0.9f, -0.39f));
+            var label = Build.Label(root, "СЕРВИСНАЯ КОНСОЛЬ\nполевая задача", new Vector3(0, 2f, 0), 2.4f, new Color(1f, 0.7f, 0.35f));
+            bool used = false;
+            var it = root.gameObject.AddComponent<Interactable>();
+            it.radius = 3f;
+            it.holdSeconds = 3f;
+            it.prompt = "[E·держать] откалибровать консоль";
+            it.enabledFn = () => !used && !S.myBug;
+            it.onInteract = () =>
             {
-                var pos = new Vector3(R(-hx + 7, hx - 7), 0, R(-hz + 5, hz - 5));
-                if (Vector3.Distance(pos, PadPos) < 9f) pos.x = Mathf.Abs(pos.x);
-                var root = new GameObject("task").transform;
+                used = true;
+                led.GetComponent<MeshRenderer>().sharedMaterial = Mats.Neon(new Color(0.4f, 0.42f, 0.45f), 0.4f);
+                label.text = "СЕРВИСНАЯ КОНСОЛЬ\n// ИСПОЛЬЗОВАНА //";
+                label.color = new Color(0.45f, 0.5f, 0.55f);
+                TaskDone("Консоль откалибрована");
+            };
+        }
+
+        // двойной рубильник: второй надо дёрнуть за 6 секунд после первого
+        void SpawnDualLeverTask()
+        {
+            var posA = TaskSpot(8f);
+            var posB = posA + new Vector3(posA.x > 0 ? -18f : 18f, 0, posA.z > 0 ? -10f : 10f);
+            posB.x = Mathf.Clamp(posB.x, -_hallW * 0.5f + 6f, _hallW * 0.5f - 6f);
+            posB.z = Mathf.Clamp(posB.z, -_hallD * 0.5f + 5f, _hallD * 0.5f - 5f);
+            float window = 0f;   // Time.time, до которого активен второй рычаг
+            bool done = false;
+            var col = new Color(0.4f, 0.85f, 1f);
+
+            Transform Lever(Vector3 pos, string name)
+            {
+                var root = new GameObject(name).transform;
                 root.SetParent(transform, false);
                 root.localPosition = pos;
-                Build.Solid(root, new Vector3(1.1f, 1.3f, 0.7f), Mats.Plastic(new Color(0.14f, 0.2f, 0.26f)), new Vector3(0, 0.65f, 0));
-                var led = Build.MeshBox(root, new Vector3(0.8f, 0.5f, 0.06f), Mats.Neon(new Color(1f, 0.7f, 0.35f), 1.6f), new Vector3(0, 0.9f, -0.39f));
-                var label = Build.Label(root, "СЕРВИСНАЯ КОНСОЛЬ\nполевая задача", new Vector3(0, 2f, 0), 2.4f, new Color(1f, 0.7f, 0.35f));
-                bool used = false;
-                var it = root.gameObject.AddComponent<Interactable>();
-                it.radius = 3f;
-                it.holdSeconds = 3f;
-                it.prompt = "[E·держать] откалибровать консоль (тревога −6)";
-                it.enabledFn = () => !used && !S.myBug;
+                Build.Solid(root, new Vector3(0.5f, 1.1f, 0.5f), Mats.MetalDark(0.5f), new Vector3(0, 0.55f, 0));
+                var arm = Build.MeshBox(root, new Vector3(0.12f, 0.7f, 0.12f), Mats.Neon(col, 1.6f), new Vector3(0, 1.35f, 0));
+                arm.transform.localRotation = Quaternion.Euler(0, 0, 35);
+                Build.Label(root, "ДВОЙНОЙ РУБИЛЬНИК\n(нужны оба за 6с)", new Vector3(0, 2.2f, 0), 2.2f, col);
+                return root;
+            }
+
+            var a = Lever(posA, "task_leverA");
+            var b = Lever(posB, "task_leverB");
+
+            void Wire(Transform lever)
+            {
+                var it = lever.gameObject.AddComponent<Interactable>();
+                it.radius = 2.8f;
+                it.dynamicPrompt = () => window > Time.time
+                    ? $"[E] ВТОРОЙ РЫЧАГ — успей! ({Mathf.Max(window - Time.time, 0f):0.0}с)"
+                    : "[E] дёрнуть рубильник (второй — за 6с)";
+                it.enabledFn = () => !done && !S.myBug;
                 it.onInteract = () =>
                 {
-                    used = true;
-                    S.ApplyAlarm(-6f);
-                    S.CareerEvent("tasks");
-                    led.GetComponent<MeshRenderer>().sharedMaterial = Mats.Neon(new Color(0.4f, 0.42f, 0.45f), 0.4f);
-                    label.text = "СЕРВИСНАЯ КОНСОЛЬ\n// ИСПОЛЬЗОВАНА //";
-                    label.color = new Color(0.45f, 0.5f, 0.55f);
-                    _hud?.Toast("Консоль откалибрована: тревога −6, карьера +1 задача");
+                    if (window > Time.time)
+                    {
+                        done = true;
+                        TaskDone("Рубильники синхронизированы");
+                    }
+                    else
+                    {
+                        window = Time.time + 6f;
+                        Sfx.Play("ui");
+                        _hud?.Toast("Первый есть! Второй рычаг — за 6 секунд!");
+                    }
+                };
+            }
+            Wire(a);
+            Wire(b);
+        }
+
+        // протяжка кабеля: пилоны по порядку, на каждый шаг — 8 секунд
+        void SpawnCableTask()
+        {
+            var col = new Color(1f, 0.85f, 0.3f);
+            var start = TaskSpot(9f);
+            var pts = new Vector3[3];
+            for (int i = 0; i < 3; i++)
+            {
+                pts[i] = start + new Vector3((i + 1) * (start.x > 0 ? -9f : 9f), 0, Mathf.Sin(i * 2.1f) * 7f);
+                pts[i].x = Mathf.Clamp(pts[i].x, -_hallW * 0.5f + 5f, _hallW * 0.5f - 5f);
+                pts[i].z = Mathf.Clamp(pts[i].z, -_hallD * 0.5f + 4f, _hallD * 0.5f - 4f);
+            }
+            int next = 0;
+            float deadline = 0f;
+            bool done = false;
+            var orbGos = new GameObject[3];
+            var dim = Mats.Neon(col, 0.5f);
+            var lit = Mats.Neon(col, 2.4f);
+
+            for (int i = 0; i < 3; i++)
+            {
+                int idx = i;
+                var root = new GameObject($"task_pylon{i}").transform;
+                root.SetParent(transform, false);
+                root.localPosition = pts[i];
+                Build.Solid(root, new Vector3(0.35f, 2.2f, 0.35f), Mats.MetalDark(0.5f), new Vector3(0, 1.1f, 0));
+                orbGos[i] = Build.MeshBox(root, Vector3.one * 0.4f, dim, new Vector3(0, 2.4f, 0));
+                Build.Label(root, $"ОПОРА {i + 1}/3\nпротяжка кабеля", new Vector3(0, 3.1f, 0), 2f, col);
+                var it = root.gameObject.AddComponent<Interactable>();
+                it.radius = 2.8f;
+                it.dynamicPrompt = () => idx == next && next > 0 && deadline > Time.time
+                    ? $"[E] тяни кабель! ({Mathf.Max(deadline - Time.time, 0f):0.0}с)"
+                    : $"[E] опора {idx + 1} (по порядку)";
+                it.enabledFn = () => !done && !S.myBug && idx == next;
+                it.onInteract = () =>
+                {
+                    if (next > 0 && Time.time > deadline)
+                    {
+                        next = 0;   // кабель остыл — сначала
+                        foreach (var o in orbGos) o.GetComponent<MeshRenderer>().sharedMaterial = dim;
+                        Sfx.Play("fail", 0.25f);
+                        _hud?.Toast("Кабель остыл — тяни заново с опоры 1");
+                        return;
+                    }
+                    orbGos[idx].GetComponent<MeshRenderer>().sharedMaterial = lit;
+                    next++;
+                    deadline = Time.time + 8f;
+                    Sfx.Play("ui");
+                    if (next >= 3)
+                    {
+                        done = true;
+                        TaskDone("Кабель протянут");
+                    }
+                    else _hud?.Toast($"Опора {next}/3! Следующая — за 8 секунд");
                 };
             }
         }
@@ -361,6 +499,7 @@ namespace Virus.World
             {
                 string[] msg = { "", "СИСТЕМА: СКАНИРОВАНИЕ — ловушки активированы!", "СИСТЕМА: ЗАЧИСТКА — роботы заряжают крюки!", "СИСТЕМА: ВТОРЖЕНИЕ — роботы вышли на охоту!" };
                 _hud?.Toast(msg[ph]);
+                Sfx.Play("alarm", 0.35f);
             }
             _phaseSeen = ph;
             RenderSettings.fogColor = ph switch
@@ -391,7 +530,7 @@ namespace Virus.World
                 var o = _traps[i];
                 o.life -= dt;
                 if (o.t == null || o.life <= 0f) { if (o.t != null) Destroy(o.t.gameObject); _traps.RemoveAt(i); continue; }
-                var target = TrapTargetPos();
+                var target = TrapTargetPos() + o.aim;   // adware: часть ловушек мажет
                 o.t.position = Vector3.MoveTowards(o.t.position, target, o.speed * dt);
                 if (Vector3.Distance(o.t.position, _player.transform.position + Vector3.up * 1.1f) < 1f)
                 {
@@ -431,7 +570,14 @@ namespace Virus.World
                 body = Build.MeshBox(transform, Vector3.one * 0.45f, Mats.Neon(info.color, 3.5f), origin);
             Build.Omni(body.transform, Vector3.zero, info.color, 1.2f, 4f);
             Build.Label(body.transform, info.name, new Vector3(0, 0.7f, 0), 1.8f, info.color);
-            _traps.Add(new Trap { t = body.transform, kind = kind, life = info.life, speed = info.speed });
+            // пассивка adware: ловушки иногда ведутся на фантомный след и промахиваются
+            var aim = Vector3.zero;
+            if (S.HasPassive("adware") && _rng.NextDouble() < 0.35)
+            {
+                float ma = (float)_rng.NextDouble() * Mathf.PI * 2f;
+                aim = new Vector3(Mathf.Cos(ma), 0, Mathf.Sin(ma)) * R(2.8f, 4.5f);
+            }
+            _traps.Add(new Trap { t = body.transform, kind = kind, life = info.life, speed = info.speed, aim = aim });
         }
 
         void ApplyTrapHit(string kind, Vector3 from)
@@ -544,6 +690,7 @@ namespace Virus.World
                     Build.Omni(body.transform, Vector3.zero, new Color(1f, 0.5f, 0.2f), 1f, 4f);
                     body.transform.rotation = Quaternion.LookRotation(hdir);
                     _hooks.Add(new Hook { t = body.transform, owner = g, dir = hdir });
+                    Sfx.Play("hook", 0.45f);
                     _hud?.Toast("⚠ РОБОТ ВЫПУСТИЛ КРЮК — уворачивайся!");
                 }
             }
@@ -628,6 +775,7 @@ namespace Virus.World
             string id = S.activeAbilities[slot];
             float cost = S.AbilityCost(id);
             if (!S.TrySpendBandwidth(cost)) { _hud?.Toast("недостаточно Bandwidth"); return; }
+            Sfx.Play("ability");
 
             float now = Time.time;
             switch (id)
@@ -730,7 +878,9 @@ namespace Virus.World
             if (_hitLock > 0f || S.myBug || _done) return;
             _hitLock = 1.2f;
             S.myHp = Mathf.Max(S.myHp - dmg, 0);
-            S.ApplyAlarm(2f);
+            // rootkit бесшумный: система слышит удар вдвое тише
+            S.ApplyAlarm(S.HasPassive("rootkit") ? 1f : 2f);
+            Sfx.Play("trap");
             DropLoot();
             _player.SetMorph(false);
             var push = _player.transform.position - from; push.y = 0;
@@ -758,6 +908,7 @@ namespace Virus.World
                     float got = S.DepositValue(l.value);
                     Destroy(l.body.gameObject);
                     string combo = S.ComboCount > 1 ? $"  КОМБО ×{S.ComboMult:0.0} ({S.ComboCount} подряд)" : "";
+                    Sfx.Play("deposit");
                     _hud?.Toast($"◈ +{(int)got} — внесено! Добыча {(int)S.access}%{combo}");
                     if (!S.evacOpen && S.access >= 100f) OpenEvac(false);
                 }
@@ -818,6 +969,7 @@ namespace Virus.World
         {
             if (_done) return;
             _done = true;
+            Sfx.Play(victory ? "win" : "fail", 0.5f);
             S.FinishHack(victory);
             _player.controlEnabled = false;
             Cursor.lockState = CursorLockMode.None;

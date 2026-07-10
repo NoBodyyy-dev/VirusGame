@@ -205,6 +205,18 @@ namespace UnityEngine
 
     public class AudioListener : Behaviour { }
 
+    public class AudioClip : Object
+    {
+        public static AudioClip Create(string name, int samples, int channels, int freq, bool stream) => new();
+        public bool SetData(float[] data, int offset) => true;
+    }
+
+    public class AudioSource : Behaviour
+    {
+        public float volume = 1f;
+        public void PlayOneShot(AudioClip clip, float vol) { }
+    }
+
     public enum LightType { Spot, Directional, Point, Area }
     public enum LightShadows { None, Hard, Soft }
     public class Light : Behaviour
