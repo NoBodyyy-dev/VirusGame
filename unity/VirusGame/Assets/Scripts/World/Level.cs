@@ -32,7 +32,14 @@ namespace Virus.World
         class Trap { public Transform t; public string kind; public float life, speed; public Vector3 aim; }
         readonly List<Trap> _traps = new();
 
-        class Guard { public Transform t; public Vector3 home; public float meleeCd, hookCd, stunUntil; public bool hookOut; }
+        class Guard
+        {
+            public Transform t, radar;
+            public readonly List<Transform> wheels = new();
+            public Vector3 home, lastPos;
+            public float meleeCd, hookCd, stunUntil;
+            public bool hookOut;
+        }
         readonly List<Guard> _guards = new();
 
         class Hook { public Transform t; public Guard owner; public Vector3 dir; public bool ret; public bool caught; }
@@ -48,7 +55,71 @@ namespace Virus.World
         bool _done;
         Color _accent;
         TextMesh _sysScreen;
-        Image _fade;
+        Image _fade, _flash;
+        float _flashA;
+        Color _flashCol = new(1f, 0.15f, 0.2f);
+        Transform _padArrow;
+
+        // тема арены по тиру узла: материалы, свет, туман
+        class ThemeCfg
+        {
+            public Material wall, floor, ceil;
+            public Color lightCol, fogCol, ambSky, ambEq, ambGnd;
+        }
+
+        ThemeCfg _theme;   // кеш: Theme() создаёт материалы, звать один раз
+
+        ThemeCfg Theme() => S.raid.theme switch
+        {
+            // домашний ПК: тёплые обои, ковёр, ламповый свет
+            "home" => new ThemeCfg
+            {
+                wall = Mats.PlasterOld(new Color(0.52f, 0.47f, 0.38f)),
+                floor = Mats.CarpetRot(),
+                ceil = Mats.PlasterOld(new Color(0.45f, 0.43f, 0.4f)),
+                lightCol = new Color(1f, 0.88f, 0.7f),
+                fogCol = new Color(0.09f, 0.08f, 0.07f),
+                ambSky = new Color(0.42f, 0.38f, 0.32f),
+                ambEq = new Color(0.32f, 0.29f, 0.25f),
+                ambGnd = new Color(0.15f, 0.13f, 0.11f),
+            },
+            // офис/лавка: серо-зелёная штукатурка, плитка, холодные лампы
+            "office" => new ThemeCfg
+            {
+                wall = Mats.PlasterOld(new Color(0.45f, 0.48f, 0.42f)),
+                floor = Mats.Sidewalk(),
+                ceil = Mats.WhitePanel(),
+                lightCol = new Color(0.92f, 0.96f, 1f),
+                fogCol = new Color(0.06f, 0.08f, 0.08f),
+                ambSky = new Color(0.36f, 0.4f, 0.38f),
+                ambEq = new Color(0.28f, 0.31f, 0.29f),
+                ambGnd = new Color(0.12f, 0.14f, 0.13f),
+            },
+            // дата-центр: металл, рифлёный пол, ледяной свет
+            "dc" => new ThemeCfg
+            {
+                wall = Mats.Metal(new Color(0.4f, 0.44f, 0.5f), 0.55f),
+                floor = Mats.DeckMetal(),
+                ceil = Mats.MetalDark(0.6f),
+                lightCol = new Color(0.75f, 0.88f, 1f),
+                fogCol = new Color(0.04f, 0.07f, 0.12f),
+                ambSky = new Color(0.3f, 0.38f, 0.5f),
+                ambEq = new Color(0.24f, 0.29f, 0.38f),
+                ambGnd = new Color(0.1f, 0.12f, 0.17f),
+            },
+            // военная сеть: бункерный бетон, ржавчина, тревожный свет
+            _ => new ThemeCfg
+            {
+                wall = Mats.BunkerWall(),
+                floor = Mats.Concrete(new Color(0.24f, 0.24f, 0.25f)),
+                ceil = Mats.Rust(),
+                lightCol = new Color(1f, 0.72f, 0.55f),
+                fogCol = new Color(0.1f, 0.05f, 0.05f),
+                ambSky = new Color(0.4f, 0.32f, 0.3f),
+                ambEq = new Color(0.3f, 0.24f, 0.22f),
+                ambGnd = new Color(0.13f, 0.1f, 0.1f),
+            },
+        };
 
         void Start()
         {
@@ -62,6 +133,7 @@ namespace Virus.World
             _hallD = 46f + (float)_rng.NextDouble() * 14f;
             _accent = GameData.TIER_COLORS[S.raid.tier];
             _trapTimer = S.raid.trapInterval;
+            _theme = Theme();
 
             BuildEnvironment();
             BuildArena();
@@ -80,7 +152,131 @@ namespace Virus.World
                     _hud.Toast($"ВСПОМОГАТЕЛЬНЫЙ ВЗЛОМ: {S.raid.assist} серверов зоны помогают (−{(int)(S.raid.assistK * 100)}% защиты)");
                 _hud.SetObjective("Тащи лут в круг у портала — набери 100% квоты");
             }
+            BuildFlashOverlay();
+            BuildPadArrow();
+            BuildMinimap();
             StartCoroutine(EnterAnimation());
+        }
+
+        // ── мини-карта: игрок/портал/лут/роботы точками (правый верх) ──
+        RectTransform _mapRoot;
+        Image _mapPlayer, _mapPad;
+        readonly List<Image> _mapLoot = new();
+        readonly List<Image> _mapGuards = new();
+        const float MapW = 190f, MapH = 140f;
+
+        Image MapDot(Color c, float size)
+        {
+            var go = new GameObject("dot", typeof(RectTransform));
+            go.transform.SetParent(_mapRoot, false);
+            var img = go.AddComponent<Image>();
+            img.color = c;
+            img.raycastTarget = false;
+            img.rectTransform.sizeDelta = new Vector2(size, size);
+            return img;
+        }
+
+        void BuildMinimap()
+        {
+            var canvasGo = new GameObject("Minimap", typeof(Canvas), typeof(CanvasScaler));
+            var canvas = canvasGo.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 30;
+            var scaler = canvasGo.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1600, 900);
+
+            var panel = new GameObject("panel", typeof(RectTransform));
+            panel.transform.SetParent(canvasGo.transform, false);
+            var bg = panel.AddComponent<Image>();
+            bg.color = new Color(0.02f, 0.04f, 0.07f, 0.55f);
+            bg.raycastTarget = false;
+            _mapRoot = bg.rectTransform;
+            _mapRoot.anchorMin = new Vector2(1, 1);
+            _mapRoot.anchorMax = new Vector2(1, 1);
+            _mapRoot.pivot = new Vector2(1, 1);
+            _mapRoot.anchoredPosition = new Vector2(-24, -64);
+            _mapRoot.sizeDelta = new Vector2(MapW, MapH);
+
+            _mapPad = MapDot(GameData.INFECTED, 12f);
+            foreach (var l in _loot) _mapLoot.Add(MapDot(new Color(0.4f, 0.9f, 1f), 6f));
+            foreach (var g in _guards) _mapGuards.Add(MapDot(new Color(1f, 0.3f, 0.3f), 8f));
+            _mapPlayer = MapDot(Color.white, 9f);
+        }
+
+        Vector2 MapPos(Vector3 world) => new(
+            Mathf.Clamp(world.x / _hallW, -0.5f, 0.5f) * (MapW - 14f) - MapW * 0.5f,
+            Mathf.Clamp(world.z / _hallD, -0.5f, 0.5f) * (MapH - 14f) - MapH * 0.5f);
+
+        void TickMinimap()
+        {
+            if (_mapRoot == null) return;
+            _mapPlayer.rectTransform.anchoredPosition = MapPos(_player.transform.position);
+            _mapPad.rectTransform.anchoredPosition = MapPos(PadPos);
+            for (int i = 0; i < _loot.Count && i < _mapLoot.Count; i++)
+            {
+                bool show = !_loot[i].deposited && _loot[i].body != null;
+                _mapLoot[i].enabled = show;
+                if (show) _mapLoot[i].rectTransform.anchoredPosition = MapPos(_loot[i].body.position);
+            }
+            // роботы видны на карте по метке spyware или при охоте
+            bool robotsVisible = S.HasPassive("spyware") || S.AlarmPhase() >= 3;
+            for (int i = 0; i < _guards.Count && i < _mapGuards.Count; i++)
+            {
+                _mapGuards[i].enabled = robotsVisible;
+                if (robotsVisible) _mapGuards[i].rectTransform.anchoredPosition = MapPos(_guards[i].t.position);
+            }
+        }
+
+        // ── красная вспышка при уроне + бирюзовый пульс на эвакуации ──
+        void BuildFlashOverlay()
+        {
+            var canvasGo = new GameObject("FlashFx", typeof(Canvas), typeof(CanvasScaler));
+            var canvas = canvasGo.GetComponent<Canvas>();
+            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+            canvas.sortingOrder = 40;
+            var go = new GameObject("flash", typeof(RectTransform));
+            go.transform.SetParent(canvasGo.transform, false);
+            _flash = go.AddComponent<Image>();
+            _flash.raycastTarget = false;
+            var rt = _flash.rectTransform;
+            rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
+            rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
+            _flash.color = new Color(0, 0, 0, 0);
+        }
+
+        // стрелка над головой: пока несёшь груз — указывает на зону выноса
+        void BuildPadArrow()
+        {
+            _padArrow = new GameObject("padArrow").transform;
+            Build.MeshBox(_padArrow, new Vector3(0.12f, 0.12f, 0.9f), Mats.Neon(GameData.INFECTED, 2.2f), new Vector3(0, 0, 0.1f));
+            Build.MeshBox(_padArrow, new Vector3(0.3f, 0.05f, 0.3f), Mats.Neon(GameData.INFECTED, 2.6f), new Vector3(0, 0, 0.62f));
+            _padArrow.gameObject.SetActive(false);
+        }
+
+        void TickFlash(float dt)
+        {
+            if (_flash == null) return;
+            _flashA = Mathf.Max(_flashA - dt * 1.6f, 0f);
+            float evacPulse = S.evacOpen && !_done
+                ? 0.06f + 0.05f * Mathf.Sin(Time.time * 5f) : 0f;
+            if (_flashA > 0.001f)
+                _flash.color = new Color(_flashCol.r, _flashCol.g, _flashCol.b, _flashA);
+            else
+                _flash.color = new Color(0.1f, 0.9f, 0.8f, evacPulse);
+        }
+
+        void TickPadArrow()
+        {
+            if (_padArrow == null || _player == null) return;
+            bool show = _carried != null && !_done;
+            if (_padArrow.gameObject.activeSelf != show) _padArrow.gameObject.SetActive(show);
+            if (!show) return;
+            _padArrow.position = _player.transform.position + Vector3.up * 2.9f;
+            var dir = PadPos - _player.transform.position;
+            dir.y = 0f;
+            if (dir.sqrMagnitude > 0.1f)
+                _padArrow.rotation = Quaternion.LookRotation(dir);
         }
 
         // ── анимация захода в сервер: тьма → вспышка кода → игра ──
@@ -126,69 +322,150 @@ namespace Virus.World
 
         void BuildEnvironment()
         {
+            var th = _theme;
             QualitySettings.pixelLightCount = 10;
             RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = new Color(0.34f, 0.4f, 0.52f);
-            RenderSettings.ambientEquatorColor = new Color(0.28f, 0.3f, 0.36f);
-            RenderSettings.ambientGroundColor = new Color(0.12f, 0.13f, 0.16f);
+            RenderSettings.ambientSkyColor = th.ambSky;
+            RenderSettings.ambientEquatorColor = th.ambEq;
+            RenderSettings.ambientGroundColor = th.ambGnd;
             RenderSettings.fog = true;
-            RenderSettings.fogColor = new Color(0.05f, 0.07f, 0.11f);
+            RenderSettings.fogColor = th.fogCol;
             RenderSettings.fogMode = FogMode.Exponential;
             RenderSettings.fogDensity = 0.004f;
             RenderSettings.skybox = null;
 
             var moon = new GameObject("Fill").AddComponent<Light>();
             moon.type = LightType.Directional;
-            moon.color = new Color(0.55f, 0.65f, 0.85f);
-            moon.intensity = 0.5f;
+            moon.color = th.lightCol;
+            moon.intensity = 0.45f;
             moon.transform.rotation = Quaternion.Euler(58, -28, 0);
             moon.shadows = LightShadows.Soft;
         }
 
         void BuildArena()
         {
+            var th = _theme;
             float hx = _hallW * 0.5f, hz = _hallD * 0.5f;
-            Build.Solid(transform, new Vector3(_hallW, 0.5f, _hallD), Mats.Concrete(new Color(0.2f, 0.22f, 0.26f)), new Vector3(0, -0.25f, 0));
-            var wall = Mats.Concrete(new Color(0.42f, 0.44f, 0.48f));
-            Build.Solid(transform, new Vector3(_hallW, 7, 0.6f), wall, new Vector3(0, 3.5f, -hz));
-            Build.Solid(transform, new Vector3(_hallW, 7, 0.6f), wall, new Vector3(0, 3.5f, hz));
-            Build.Solid(transform, new Vector3(0.6f, 7, _hallD), wall, new Vector3(-hx, 3.5f, 0));
-            Build.Solid(transform, new Vector3(0.6f, 7, _hallD), wall, new Vector3(hx, 3.5f, 0));
-            Build.Solid(transform, new Vector3(_hallW, 0.35f, _hallD), Mats.Concrete(new Color(0.3f, 0.31f, 0.34f)), new Vector3(0, 7.3f, 0));
+            Build.Solid(transform, new Vector3(_hallW, 0.5f, _hallD), th.floor, new Vector3(0, -0.25f, 0));
+            Build.Solid(transform, new Vector3(_hallW, 7, 0.6f), th.wall, new Vector3(0, 3.5f, -hz));
+            Build.Solid(transform, new Vector3(_hallW, 7, 0.6f), th.wall, new Vector3(0, 3.5f, hz));
+            Build.Solid(transform, new Vector3(0.6f, 7, _hallD), th.wall, new Vector3(-hx, 3.5f, 0));
+            Build.Solid(transform, new Vector3(0.6f, 7, _hallD), th.wall, new Vector3(hx, 3.5f, 0));
+            Build.Solid(transform, new Vector3(_hallW, 0.35f, _hallD), th.ceil, new Vector3(0, 7.3f, 0));
 
-            // акцент тира по периметру + прожекторы
+            // акцент тира по периметру + плинтус-подсветка
             Build.MeshBox(transform, new Vector3(_hallW - 2, 0.06f, 0.2f), Mats.Neon(_accent, 1.2f), new Vector3(0, 0.05f, -hz + 1.2f));
             Build.MeshBox(transform, new Vector3(_hallW - 2, 0.06f, 0.2f), Mats.Neon(_accent, 1.2f), new Vector3(0, 0.05f, hz - 1.2f));
+
+            // кабель-каналы и трубы под потолком (вдоль зала)
+            var pipeMat = Mats.MetalDark(0.55f);
+            for (int i = 0; i < 4; i++)
+            {
+                float z = Mathf.Lerp(-hz + 4f, hz - 4f, (i + 0.5f) / 4f) + (float)_rng.NextDouble() * 1.6f - 0.8f;
+                Build.MeshBox(transform, new Vector3(_hallW - 3f, 0.16f, 0.16f), pipeMat, new Vector3(0, 6.9f - i * 0.12f, z));
+            }
+            for (int i = 0; i < 2; i++)
+            {
+                float x = Mathf.Lerp(-hx + 6f, hx - 6f, i);
+                Build.MeshBox(transform, new Vector3(0.22f, 0.22f, _hallD - 3f), pipeMat, new Vector3(x, 6.7f, 0));
+            }
+
+            // потолочные светильники: тёплые/холодные по теме
             for (int gx = 0; gx < 3; gx++)
                 for (int gz = 0; gz < 2; gz++)
                 {
                     var lp = new Vector3((gx - 1) * _hallW * 0.3f, 6.9f, (gz - 0.5f) * _hallD * 0.42f);
-                    Build.MeshBox(transform, new Vector3(4.6f, 0.14f, 1.7f), Mats.Neon(new Color(1f, 0.93f, 0.78f), 2.4f), lp);
-                    var sl = Build.SpotDown(transform, lp + Vector3.down * 0.3f, new Color(1f, 0.93f, 0.8f), 4.2f, 16f);
+                    Build.MeshBox(transform, new Vector3(4.6f, 0.14f, 1.7f), Mats.Neon(th.lightCol, 2.4f), lp);
+                    var sl = Build.SpotDown(transform, lp + Vector3.down * 0.3f, th.lightCol, 4.2f, 16f);
                     sl.shadows = LightShadows.Soft;
                 }
 
-            // тематический реквизит по тиру
-            var propMat = Mats.Plastic(new Color(0.3f, 0.33f, 0.38f));
-            int props = 8 + S.raid.tier * 3;
-            for (int i = 0; i < props; i++)
-            {
-                var pos = new Vector3(R(-hx + 6, hx - 6), 0, R(-hz + 5, hz - 5));
-                if (Vector3.Distance(pos, PadPos) < 8f) continue;
-                float h = R(1.2f, 3.6f);
-                Build.Solid(transform, new Vector3(R(1.4f, 3.4f), h, R(1.2f, 2.6f)), propMat, pos + Vector3.up * (h * 0.5f));
-                if (_rng.NextDouble() < 0.5)
-                    Build.MeshBox(transform, new Vector3(1.2f, 0.08f, 0.08f), Mats.Neon(_accent, 1.2f), pos + Vector3.up * (h + 0.06f));
-            }
+            BuildThemeProps(hx, hz);
 
             // экран СИСТЕМЫ на стене
             Build.MeshBox(transform, new Vector3(11, 4.6f, 0.5f), Mats.Plastic(new Color(0.2f, 0.22f, 0.26f)), new Vector3(6, 3.4f, -hz + 0.6f));
             _sysScreen = Build.Label(transform, "", new Vector3(6, 3.4f, -hz + 1.0f), 3.4f, new Color(0.75f, 0.95f, 1f), false);
         }
 
+        // ── реквизит по теме: у каждого тира свой характер зала ──
+        void BuildThemeProps(float hx, float hz)
+        {
+            switch (S.raid.theme)
+            {
+                case "home":   // столы с домашними ПК, диваны
+                    for (int i = 0; i < 7; i++)
+                    {
+                        var pos = FreeSpot(hx, hz);
+                        Build.Solid(transform, new Vector3(2.2f, 0.8f, 1.1f), Mats.PlasterOld(new Color(0.42f, 0.33f, 0.24f)), pos + Vector3.up * 0.4f);
+                        Build.MeshBox(transform, new Vector3(0.9f, 0.6f, 0.08f), Mats.Neon(new Color(0.5f, 0.75f, 1f), 1.4f), pos + new Vector3(0, 1.15f, -0.3f));
+                        Build.MeshBox(transform, new Vector3(0.5f, 0.35f, 0.4f), Mats.Plastic(new Color(0.2f, 0.2f, 0.22f)), pos + new Vector3(0.7f, 0.98f, 0.1f));
+                    }
+                    for (int i = 0; i < 3; i++)
+                    {
+                        var pos = FreeSpot(hx, hz);
+                        Build.Solid(transform, new Vector3(2.6f, 0.7f, 1.2f), Mats.CarpetRot(), pos + Vector3.up * 0.35f);
+                        Build.Solid(transform, new Vector3(2.6f, 0.7f, 0.35f), Mats.CarpetRot(), pos + new Vector3(0, 0.9f, -0.45f));
+                    }
+                    break;
+                case "office":   // ряды столов с перегородками
+                    for (int row = 0; row < 3; row++)
+                        for (int k = 0; k < 4; k++)
+                        {
+                            var pos = new Vector3(-hx + 10f + row * (hx * 0.55f), 0, -hz + 6f + k * ((hz * 2f - 12f) / 4f));
+                            if (Vector3.Distance(pos, PadPos) < 9f) continue;
+                            Build.Solid(transform, new Vector3(2f, 0.78f, 1f), Mats.Plastic(new Color(0.5f, 0.47f, 0.42f)), pos + Vector3.up * 0.39f);
+                            Build.Solid(transform, new Vector3(2f, 1.5f, 0.1f), Mats.PlasterOld(new Color(0.38f, 0.4f, 0.36f)), pos + new Vector3(0, 0.75f, 0.55f));
+                            Build.MeshBox(transform, new Vector3(0.75f, 0.5f, 0.07f), Mats.Neon(new Color(0.6f, 0.8f, 0.9f), 1.1f), pos + new Vector3(-0.3f, 1.05f, 0.2f));
+                        }
+                    break;
+                case "dc":   // ровные ряды серверных стоек с мигающими LED
+                    for (int row = 0; row < 3; row++)
+                    {
+                        float x = -hx + 12f + row * (hx * 0.6f);
+                        for (int k = 0; k < 5; k++)
+                        {
+                            var pos = new Vector3(x, 0, -hz + 5f + k * ((hz * 2f - 10f) / 5f));
+                            if (Vector3.Distance(pos, PadPos) < 9f) continue;
+                            Build.Solid(transform, new Vector3(1.4f, 2.6f, 1f), Mats.MetalDark(0.4f), pos + Vector3.up * 1.3f);
+                            for (int led = 0; led < 4; led++)
+                                Build.MeshBox(transform, new Vector3(1.15f, 0.08f, 0.04f),
+                                    Mats.Neon(led % 2 == 0 ? _accent : new Color(0.3f, 1f, 0.5f), 1.6f),
+                                    pos + new Vector3(0, 0.5f + led * 0.55f, -0.53f));
+                        }
+                    }
+                    break;
+                default:   // бункер: бетонные блоки, ящики с hazard-полосами
+                    for (int i = 0; i < 9; i++)
+                    {
+                        var pos = FreeSpot(hx, hz);
+                        float h = R(1.1f, 2.4f);
+                        Build.Solid(transform, new Vector3(R(1.6f, 3f), h, R(1.4f, 2.4f)), Mats.Concrete(new Color(0.3f, 0.3f, 0.31f)), pos + Vector3.up * (h * 0.5f));
+                        if (_rng.NextDouble() < 0.6)
+                            Build.MeshBox(transform, new Vector3(1.4f, 0.18f, 0.06f), Mats.Hazard(), pos + new Vector3(0, h * 0.5f, -R(0.7f, 1.2f)));
+                    }
+                    break;
+            }
+        }
+
+        Vector3 FreeSpot(float hx, float hz)
+        {
+            for (int tries = 0; tries < 8; tries++)
+            {
+                var pos = new Vector3(R(-hx + 6, hx - 6), 0, R(-hz + 5, hz - 5));
+                if (Vector3.Distance(pos, PadPos) >= 9f) return pos;
+            }
+            return new Vector3(hx - 8f, 0, 0);
+        }
+
         void BuildPortal()
         {
             Build.MeshBox(transform, new Vector3(PadRadius * 2, 0.1f, PadRadius * 2), Mats.Neon(GameData.INFECTED, 0.5f), PadPos + Vector3.up * 0.05f);
+            // hazard-рамка по периметру зоны выноса
+            float b = PadRadius + 0.55f;
+            Build.MeshBox(transform, new Vector3(b * 2, 0.06f, 0.35f), Mats.Hazard(), PadPos + new Vector3(0, 0.04f, -b));
+            Build.MeshBox(transform, new Vector3(b * 2, 0.06f, 0.35f), Mats.Hazard(), PadPos + new Vector3(0, 0.04f, b));
+            Build.MeshBox(transform, new Vector3(0.35f, 0.06f, b * 2), Mats.Hazard(), PadPos + new Vector3(-b, 0.04f, 0));
+            Build.MeshBox(transform, new Vector3(0.35f, 0.06f, b * 2), Mats.Hazard(), PadPos + new Vector3(b, 0.04f, 0));
             Build.Omni(transform, PadPos + Vector3.up * 2f, new Color(0.1f, 0.8f, 0.9f), 1.6f, 8f);
             Build.Label(transform, "ЗОНА ВЫНОСА — неси лут сюда", PadPos + Vector3.up * 2.6f, 3f, GameData.INFECTED);
         }
@@ -220,7 +497,7 @@ namespace Virus.World
                 it.radius = 2.7f;
                 it.dynamicPrompt = () => _carried == null
                     ? $"[E] схватить лут (◈ {(int)value})"
-                    : "[E] бросить лут";
+                    : "[E] положить · [F] швырнуть";
                 it.enabledFn = () => !loot.deposited && (_carried == null || _carried == loot);
                 it.onInteract = () => ToggleCarry(loot);
             }
@@ -275,6 +552,22 @@ namespace Virus.World
                 // дуло крюка
                 Build.MeshBox(root, new Vector3(0.2f, 0.2f, 0.6f), Mats.Metal(new Color(0.35f, 0.38f, 0.42f), 0.6f), new Vector3(0, 1.9f, 0.75f));
                 Build.Omni(root, new Vector3(0, 2.6f, 0), new Color(1f, 0.25f, 0.2f), 1.4f, 9f);
+                var guard = new Guard { t = root, home = corners[i], lastPos = corners[i], hookCd = (float)_rng.NextDouble() * 4f + 4f };
+                // колёса и вращающийся радар — робот выглядит живым
+                var wheelMat = Mats.Plastic(new Color(0.08f, 0.09f, 0.1f));
+                foreach (var (wx, wz) in new[] { (-0.95f, 0.9f), (0.95f, 0.9f), (-0.95f, -0.9f), (0.95f, -0.9f) })
+                {
+                    var w = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+                    Destroy(w.GetComponent<Collider>());
+                    w.transform.SetParent(root, false);
+                    w.transform.localPosition = new Vector3(wx, 0.36f, wz);
+                    w.transform.localScale = new Vector3(0.72f, 0.14f, 0.72f);
+                    w.transform.localRotation = Quaternion.Euler(0, 0, 90);
+                    w.GetComponent<MeshRenderer>().sharedMaterial = wheelMat;
+                    guard.wheels.Add(w.transform);
+                }
+                guard.radar = Build.MeshBox(root, new Vector3(0.55f, 0.08f, 0.18f),
+                    Mats.Metal(new Color(0.7f, 0.72f, 0.76f), 0.4f), new Vector3(0, 2.92f, 0)).transform;
                 // пассивка spyware: радиус обзора робота виден кольцом на полу
                 if (S.HasPassive("spyware"))
                 {
@@ -286,7 +579,7 @@ namespace Virus.World
                             new Vector3(Mathf.Cos(a) * rr, 0.06f, Mathf.Sin(a) * rr));
                     }
                 }
-                _guards.Add(new Guard { t = root, home = corners[i], hookCd = (float)_rng.NextDouble() * 4f + 4f });
+                _guards.Add(guard);
             }
         }
 
@@ -486,10 +779,39 @@ namespace Virus.World
             }
             TickHooked(dt);
             TickAbilities();
+            TickThrow();
             TickCarryAndDeposit();
             TickBugAndRevive(dt);
             TickEvac(dt);
             TickSystemScreen();
+            TickFlash(dt);
+            TickPadArrow();
+            TickLootPulse();
+            TickMinimap();
+        }
+
+        // [F] — швырнуть груз вперёд (перекинуть напарнику или докинуть к порталу)
+        void TickThrow()
+        {
+            if (_carried == null || !Input.GetKeyDown(KeyCode.F)) return;
+            if (UI.PuzzleUI.IsOpen || UI.EvolutionUI.IsOpen) return;
+            var l = _carried;
+            DropLoot();
+            l.rb.linearVelocity = _player.LookDir() * 10f + Vector3.up * 4.5f;
+            Sfx.Play("ui", 0.3f);
+        }
+
+        // лут рядом «дышит» подсветкой — легче заметить в темноте
+        void TickLootPulse()
+        {
+            var pp = _player.transform.position;
+            foreach (var l in _loot)
+            {
+                if (l.deposited || l.body == null || l.label == null) continue;
+                bool near = Vector3.Distance(pp, l.body.position) < 5f;
+                float k = near ? 1f + 0.25f * Mathf.Sin(Time.time * 6f) : 1f;
+                l.label.characterSize = 2.2f * 0.08f * k;
+            }
         }
 
         void TickPhaseFx()
@@ -507,7 +829,7 @@ namespace Virus.World
                 3 => new Color(0.25f, 0.03f, 0.05f),
                 2 => new Color(0.2f, 0.08f, 0.08f),
                 1 => new Color(0.14f, 0.11f, 0.06f),
-                _ => new Color(0.05f, 0.07f, 0.11f),
+                _ => _theme.fogCol,
             };
         }
 
@@ -651,6 +973,11 @@ namespace Virus.World
             {
                 g.meleeCd = Mathf.Max(g.meleeCd - dt, 0f);
                 g.hookCd = Mathf.Max(g.hookCd - dt, 0f);
+                // колёса крутятся от пройденного пути, радар — всегда (кроме стана)
+                float moved = (g.t.position - g.lastPos).magnitude;
+                g.lastPos = g.t.position;
+                foreach (var w in g.wheels) w.Rotate(0f, moved / 0.36f * Mathf.Rad2Deg, 0f, Space.Self);
+                if (Time.time >= g.stunUntil && g.radar != null) g.radar.Rotate(0f, 140f * dt, 0f, Space.Self);
                 if (Time.time < g.stunUntil || g.hookOut) continue;   // ЭМИ или крюк в полёте — робот замер
 
                 var pp = _player.transform.position;
@@ -676,6 +1003,8 @@ namespace Virus.World
                         if (face.sqrMagnitude > 0.1f)
                             g.t.rotation = Quaternion.Slerp(g.t.rotation, Quaternion.LookRotation(face), 4f * dt);
                     }
+                    else
+                        g.t.Rotate(0f, 22f * dt, 0f);   // дежурное сканирование зала
                 }
 
                 // крюк: с 50% тревоги по цели в радиусе обзора (на 100% — дальнобойный)
@@ -736,6 +1065,7 @@ namespace Virus.World
                     DropLoot();
                     _hookedUntil = Time.time + 1.6f;
                     _hookedBy = h.owner;
+                    _player.Shake(0.6f);
                     _hud?.Toast("🪝 КРЮК ЗАЦЕПИЛ — тебя тянет к роботу!");
                 }
             }
@@ -880,6 +1210,8 @@ namespace Virus.World
             S.myHp = Mathf.Max(S.myHp - dmg, 0);
             // rootkit бесшумный: система слышит удар вдвое тише
             S.ApplyAlarm(S.HasPassive("rootkit") ? 1f : 2f);
+            _flashA = Mathf.Min(0.4f + dmg * 0.12f, 0.65f);
+            _player.Shake(0.5f + dmg * 0.15f);
             Sfx.Play("trap");
             DropLoot();
             _player.SetMorph(false);

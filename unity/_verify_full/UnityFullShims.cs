@@ -270,7 +270,7 @@ namespace UnityEngine
     {
         public float mass;
         public bool isKinematic, useGravity = true;
-        public Vector3 velocity;
+        public Vector3 velocity, linearVelocity;
         public void AddForce(Vector3 f) { }
     }
 

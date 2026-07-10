@@ -201,6 +201,14 @@ namespace Virus.Player
             _camera.fieldOfView = Mathf.Lerp(_camera.fieldOfView, targetFov, 6f * Time.deltaTime);
         }
 
+        // ── тряска камеры (удары, крюк) ──
+        float _shake;
+        System.Random _shakeRng = new();
+
+        public void Shake(float amount) => _shake = Mathf.Max(_shake, amount);
+
+        float ShakeOff() => ((float)_shakeRng.NextDouble() * 2f - 1f) * _shake;
+
         // ── спринг-арм: камера не проваливается сквозь стены ──
         void LateUpdate()
         {
@@ -210,7 +218,8 @@ namespace Virus.Player
             if (Physics.SphereCast(origin, ArmRadius, dir, out var hit, ArmLen,
                     Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
                 dist = Mathf.Max(hit.distance - 0.08f, 0.35f);
-            _cam.localPosition = new Vector3(0, 0, -dist);
+            _shake = Mathf.Max(_shake - Time.deltaTime * 1.6f, 0f);
+            _cam.localPosition = new Vector3(ShakeOff() * 0.25f, ShakeOff() * 0.2f, -dist);
         }
 
         public Vector3 LookDir()
