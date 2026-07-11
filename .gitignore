@@ -8,3 +8,7 @@ unity/_verify/bin/
 unity/_verify/obj/
 unity/_verify_full/bin/
 unity/_verify_full/obj/
+
+# производные артефакты — пересоздаются (graphify update; сборка)
+graphify-out/
+VirusGame_coop_test.zip
