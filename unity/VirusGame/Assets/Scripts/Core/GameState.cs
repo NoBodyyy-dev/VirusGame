@@ -73,10 +73,15 @@ namespace Virus.Core
         {
             public string name, theme, av;
             public int tier, quota, files, crates, sensitivity, seed;
+            public int safes;           // сейфы (вес 3): T2+ — поднимать вдвоём
             public float trapInterval, camRange, creep;
             public int assist;          // вспомогательный взлом: заражённые серверы зоны
             public float assistK;       // их суммарная помощь (0..~0.35)
         }
+
+        // размер стаи (обновляет NetManager): рейды масштабируются под кооп —
+        // больше квота/лута/роботов, чаще ловушки, быстрее тревога
+        public int packSize = 1;
 
         public RaidConfig raid;
         public float access, alarm, maxBandwidth = 100f, bandwidth = 100f, bwRegen = 4f;
@@ -427,11 +432,20 @@ namespace Virus.Core
                 if (g.zone == n.zone && g.infected) assist++;
             float assistK = Mathf.Min(assist * (HasPassive("botnet") ? 0.06f : 0.03f), 0.35f);
             alarm *= 1f - assistK;
+            // кооп-скейлинг: на каждого штамма сверх первого — квота +40%,
+            // больше лута и роботов, ловушки чаще, тревога живее
+            int extra = Math.Max(packSize - 1, 0);
             raid = new RaidConfig {
                 name = n.name, tier = n.tier, theme = t.theme, av = n.av,
-                quota = t.quota, files = t.files, crates = t.crates,
-                sensitivity = t.sensitivity, trapInterval = t.trapInterval * (1f + assistK),
-                camRange = t.camRange, creep = t.creep * (1f - assistK * 0.5f), seed = n.seed,
+                quota = (int)(t.quota * (1f + 0.4f * extra)),
+                files = t.files + extra,
+                crates = t.crates + extra / 2,
+                safes = n.tier >= 2 ? 1 + extra / 3 : 0,
+                sensitivity = Math.Min(t.sensitivity + extra / 2, 4),
+                trapInterval = t.trapInterval * (1f + assistK) / (1f + 0.15f * extra),
+                camRange = t.camRange,
+                creep = t.creep * (1f - assistK * 0.5f) * (1f + 0.12f * extra),
+                seed = n.seed,
                 assist = assist, assistK = assistK,
             };
         }
@@ -504,6 +518,10 @@ namespace Virus.Core
         {
             var sb = new System.Text.StringBuilder();
             sb.Append("v=1\n");
+            // сид кампании: без него после перезапуска арены рейдов другие
+            sb.Append($"seed={campaignSeed}\n");
+            // точка возврата: спавн у последнего узла, а не с начала Грида
+            sb.Append($"cur={currentNode?.id ?? -1}\n");
             sb.Append($"branch={branch}\n");
             sb.Append($"secondary={secondaryBranch}\n");
             sb.Append($"level={virusLevel}\n");
@@ -517,6 +535,9 @@ namespace Virus.Core
             var inf = new List<string>();
             foreach (var n in gridNodes) if (n.infected) inf.Add(n.id.ToString());
             sb.Append($"infected={string.Join(",", inf)}\n");
+            var failn = new List<string>();
+            foreach (var n in gridNodes) if (n.failed && !n.infected) failn.Add(n.id.ToString());
+            sb.Append($"failedn={string.Join(",", failn)}\n");
             var flags = new List<string>();
             foreach (var kv in gridFlags) if (kv.Value) flags.Add(kv.Key);
             sb.Append($"flags={string.Join(",", flags)}\n");
@@ -537,6 +558,13 @@ namespace Virus.Core
                 string key = line.Substring(0, eq), val = line.Substring(eq + 1);
                 switch (key)
                 {
+                    case "seed":
+                        if (int.TryParse(val, out var seed)) ReseedCampaign(seed);
+                        break;
+                    case "cur":
+                        if (int.TryParse(val, out var cur) && cur >= 0 && cur < gridNodes.Count)
+                            currentNode = gridNodes[cur];
+                        break;
                     case "branch": branch = val; break;
                     case "secondary": secondaryBranch = val; break;
                     case "level": int.TryParse(val, out virusLevel); break;
@@ -551,6 +579,11 @@ namespace Virus.Core
                         foreach (var ids in val.Split(','))
                             if (int.TryParse(ids, out var id) && id >= 0 && id < gridNodes.Count)
                             { gridNodes[id].infected = true; gridNodes[id].failed = false; }
+                        break;
+                    case "failedn":
+                        foreach (var ids in val.Split(','))
+                            if (int.TryParse(ids, out var id) && id >= 0 && id < gridNodes.Count && !gridNodes[id].infected)
+                                gridNodes[id].failed = true;
                         break;
                     case "flags":
                         foreach (var fl in val.Split(',')) if (fl.Length > 0) gridFlags[fl] = true;

@@ -101,6 +101,51 @@ namespace Virus.EditorTools
         // ── URP: пайплайн-ассет (Forward+), HDR, базовые материалы в Resources.
         // Материалы-ассеты тянут в билд шейдер URP/Lit ровно с нужными
         // вариантами (always-included для URP/Lit взорвал бы время сборки).
+        // SSAO — главный «объёмный» эффект URP: углы и стыки геометрии
+        // затеняются, боксы перестают выглядеть плоскими. Добавляем фичу в
+        // renderer-ассет идемпотентно; настройки — через SerializedObject
+        // (поля приватные). Любая ошибка — просто пропускаем (не критично).
+        static void EnsureSSAO(UniversalRendererData rendererData)
+        {
+            try
+            {
+                foreach (var f in rendererData.rendererFeatures)
+                    if (f != null && f.GetType().Name == "ScreenSpaceAmbientOcclusion") return;
+                var t = System.Type.GetType(
+                    "UnityEngine.Rendering.Universal.ScreenSpaceAmbientOcclusion, Unity.RenderPipelines.Universal.Runtime");
+                if (t == null) { Debug.LogWarning("[VirusBuild] SSAO: тип не найден"); return; }
+                var ssao = (UnityEngine.Rendering.Universal.ScriptableRendererFeature)ScriptableObject.CreateInstance(t);
+                ssao.name = "SSAO";
+                var so = new SerializedObject(ssao);
+                var s = so.FindProperty("m_Settings");
+                if (s != null)
+                {
+                    var i = s.FindPropertyRelative("Intensity"); if (i != null) i.floatValue = 1.6f;
+                    var r = s.FindPropertyRelative("Radius"); if (r != null) r.floatValue = 0.4f;
+                    var dl = s.FindPropertyRelative("DirectLightingStrength"); if (dl != null) dl.floatValue = 0.35f;
+                    so.ApplyModifiedProperties();
+                }
+                AssetDatabase.AddObjectToAsset(ssao, rendererData);
+                var rdSo = new SerializedObject(rendererData);
+                var list = rdSo.FindProperty("m_RendererFeatures");
+                list.InsertArrayElementAtIndex(list.arraySize);
+                list.GetArrayElementAtIndex(list.arraySize - 1).objectReferenceValue = ssao;
+                var map = rdSo.FindProperty("m_RendererFeatureMap");
+                if (map != null)
+                {
+                    map.InsertArrayElementAtIndex(map.arraySize);
+                    long fileId = 0;
+                    if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(ssao, out _, out long lfid)) fileId = lfid;
+                    map.GetArrayElementAtIndex(map.arraySize - 1).longValue = fileId;
+                }
+                rdSo.ApplyModifiedProperties();
+                EditorUtility.SetDirty(rendererData);
+                AssetDatabase.SaveAssets();
+                Debug.Log("[VirusBuild] +SSAO renderer feature");
+            }
+            catch (System.Exception e) { Debug.LogWarning("[VirusBuild] SSAO пропущен: " + e.Message); }
+        }
+
         [MenuItem("Virus/Setup URP")]
         public static void SetupURP()
         {
@@ -125,6 +170,13 @@ namespace Virus.EditorTools
             rp.shadowDistance = 70f;
             GraphicsSettings.defaultRenderPipeline = rp;
             QualitySettings.renderPipeline = rp;
+            EnsureSSAO(rendererData);
+
+            // материал голограммы «бегущего кода» (Virus/HoloCode) — через
+            // Resources, чтобы шейдер попал в билд
+            var holoShader = Shader.Find("Virus/HoloCode");
+            if (holoShader != null && AssetDatabase.LoadAssetAtPath<Material>("Assets/Resources/mat_holo.mat") == null)
+                AssetDatabase.CreateAsset(new Material(holoShader), "Assets/Resources/mat_holo.mat");
 
             // материал частиц: мягкая светящаяся точка (аддитивная прозрачность),
             // настраиваем идемпотентно при каждой сборке

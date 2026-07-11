@@ -45,7 +45,7 @@ namespace Virus.World
         TextMesh _board;
         Material _coreMat, _eyeMat;
         readonly List<Light> _alertLights = new();
-        readonly List<(Transform t, Vector3 basePos)> _motes = new();
+        readonly List<(Transform t, Vector3 basePos, int id)> _motes = new();
         float _knockLock, _boardT;
         bool _ridingZip;
 
@@ -288,13 +288,17 @@ namespace Virus.World
             }
         }
 
+        // моты одноразовые на кампанию: подобранный помечается флагом mote:<i>
+        // (флаг уходит в сейв и рассылается стае — у напарников мот тоже гаснет)
         void BuildMotes()
         {
-            foreach (var pos in GridData.MOTES)
+            for (int i = 0; i < GridData.MOTES.Length; i++)
             {
+                if (S.Flag($"mote:{i}")) continue;
+                var pos = GridData.MOTES[i];
                 var m = Build.MeshBox(transform, Vector3.one * 0.5f, Mats.Neon(GameData.INFECTED, 1.8f), pos);
                 m.transform.rotation = Quaternion.Euler(45, 0, 45);
-                _motes.Add((m.transform, pos));
+                _motes.Add((m.transform, pos, i));
             }
         }
 
@@ -304,12 +308,19 @@ namespace Virus.World
             float t = Time.time;
             for (int i = _motes.Count - 1; i >= 0; i--)
             {
-                var (tr, basePos) = _motes[i];
+                var (tr, basePos, id) = _motes[i];
                 if (tr == null) { _motes.RemoveAt(i); continue; }
+                if (S.Flag($"mote:{id}"))   // напарник успел первым
+                {
+                    Destroy(tr.gameObject);
+                    _motes.RemoveAt(i);
+                    continue;
+                }
                 tr.position = basePos + Vector3.up * (Mathf.Sin(t * 2f + i) * 0.25f);
                 tr.Rotate(0, 60f * Time.deltaTime, 0, Space.World);
                 if (Vector3.Distance(_player.transform.position, tr.position) < 1.8f)
                 {
+                    S.SetFlag($"mote:{id}");
                     S.resources["data_fragments"] += 3;
                     _hud?.Toast("+3 Data Fragments");
                     Destroy(tr.gameObject);

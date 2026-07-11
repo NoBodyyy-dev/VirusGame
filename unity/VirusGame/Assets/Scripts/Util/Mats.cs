@@ -114,6 +114,18 @@ namespace Virus.Util
             return m;
         }
 
+        // голограмма «бегущего кода» (шейдер Virus/HoloCode) — для барьеров
+        // и щитов; базовый материал кладёт в Resources editor-скрипт SetupURP.
+        // Без шейдера (билд без ассета) тихо откатываемся на неон.
+        public static Material Holo(Color c, float alpha = 0.55f)
+        {
+            var baseM = Resources.Load<Material>("mat_holo");
+            if (baseM == null || baseM.shader == null) return Neon(c, 0.9f);
+            var m = new Material(baseM);
+            m.SetColor("_Color", new Color(c.r, c.g, c.b, alpha));
+            return m;
+        }
+
         public static Material Neon(Color c, float energy = 1.8f)
         {
             var m = NewEmissive();

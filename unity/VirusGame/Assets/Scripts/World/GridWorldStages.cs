@@ -53,7 +53,9 @@ namespace Virus.World
             bool done = S.ZoneComplete(t.gateZone);
             float cx = (t.x0 + t.x1) * 0.5f, gw = t.x1 - t.x0 - WallT * 2f, gz = t.zs - 1.6f;
             var col = t.key == "t3o" ? GameData.ORACLE : new Color(0.2f, 0.55f, 1f);
-            var pane = Build.MeshBox(transform, new Vector3(gw, DoorH, 0.3f), Mats.Neon(col, done ? 0.25f : 0.9f), new Vector3(cx, DoorH * 0.5f, gz));
+            // запертый барьер — голограмма с бегущим кодом (по ТЗ: «переливающийся код»)
+            var pane = Build.MeshBox(transform, new Vector3(gw, DoorH, 0.3f),
+                done ? Mats.Neon(col, 0.25f) : Mats.Holo(col), new Vector3(cx, DoorH * 0.5f, gz));
             if (done) pane.transform.localScale = new Vector3(gw, 0.3f, 0.3f);  // открытый барьер — тонкая планка сверху
             Build.Omni(transform, new Vector3(cx, 3f, gz + 2f), col, 1.8f, 10f);
             if (!done) Build.Collide(transform, new Vector3(gw, DoorH, 0.4f), new Vector3(cx, DoorH * 0.5f, gz));
@@ -98,7 +100,9 @@ namespace Virus.World
         {
             bool done = S.ZoneComplete(0);
             const float gz = -6f, gw = 4f;
-            var pane = Build.MeshBox(transform, new Vector3(gw, DoorH, 0.3f), Mats.Neon(new Color(0.25f, 0.6f, 1f), done ? 0.3f : 1.2f), new Vector3(0, DoorH * 0.5f, gz));
+            var pane = Build.MeshBox(transform, new Vector3(gw, DoorH, 0.3f),
+                done ? Mats.Neon(new Color(0.25f, 0.6f, 1f), 0.3f) : Mats.Holo(new Color(0.25f, 0.6f, 1f)),
+                new Vector3(0, DoorH * 0.5f, gz));
             if (done) pane.transform.localScale = new Vector3(gw, 0.3f, 0.3f);
             if (!done) Build.Collide(transform, new Vector3(gw, DoorH, 0.4f), new Vector3(0, DoorH * 0.5f, gz));
             Build.Omni(transform, new Vector3(0, 3, gz + 1.5f), new Color(0.25f, 0.6f, 1f), 1.8f, 10f);
@@ -124,7 +128,8 @@ namespace Virus.World
             {
                 float w = R(8, 14), h = R(24, 46);
                 var win = Mats.Neon(new Color(0.95f, 0.82f, 0.55f), 0.9f);
-                Build.MeshBox(transform, new Vector3(w, h, w), Mats.Plastic(new Color(0.06f, 0.07f, 0.1f)), spots[i] + Vector3.up * (h * 0.5f));
+                // Solid, не MeshBox: в здание нельзя провалиться (в Гриде всё с коллизией)
+                Build.Solid(transform, new Vector3(w, h, w), Mats.Plastic(new Color(0.06f, 0.07f, 0.1f)), spots[i] + Vector3.up * (h * 0.5f));
                 // «окна» — светящиеся горизонтальные пояса
                 for (float y = 3f; y < h - 2f; y += 4f)
                     Build.MeshBox(transform, new Vector3(w + 0.1f, 0.8f, w + 0.1f), win, spots[i] + Vector3.up * y);

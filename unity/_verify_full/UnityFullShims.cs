@@ -312,7 +312,13 @@ namespace UnityEngine
         public ShapeModule shape => new();
     }
 
-    public class ParticleSystemRenderer : Renderer { }
+    public enum ParticleSystemRenderMode { Billboard, Stretch, HorizontalBillboard, VerticalBillboard, Mesh }
+
+    public class ParticleSystemRenderer : Renderer
+    {
+        public ParticleSystemRenderMode renderMode;
+        public float lengthScale, velocityScale;
+    }
 
     public class ReflectionProbe : Behaviour
     {
@@ -322,6 +328,7 @@ namespace UnityEngine
         public Vector3 size;
         public int resolution;
         public bool boxProjection;
+        public int RenderProbe() => 0;
     }
 
     public class Mesh : Object { }

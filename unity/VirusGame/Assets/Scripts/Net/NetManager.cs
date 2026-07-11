@@ -205,6 +205,9 @@ namespace Virus.Net
             SteamPollImpl();   // Steam P2P читается в главном потоке
             while (_inbox.TryDequeue(out var item)) Handle(item.from, item.line);
 
+            // размер стаи масштабирует рейды (квота/роботы/ловушки)
+            GameState.I.packSize = Active ? 1 + _avatars.Count : 1;
+
             if (!Active) return;
             _posTimer -= Time.deltaTime;
             if (_posTimer <= 0f)

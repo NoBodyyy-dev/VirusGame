@@ -4,6 +4,7 @@ namespace Virus.Core
 {
     // Godot-автолоад GameState → персистентный синглтон Unity (DontDestroyOnLoad).
     // Держит ссылку на чистое ядро Virus.Core.GameState и гоняет его Tick.
+    // Сейв кампании — App.SaveSystem (файл в persistentDataPath).
     public class GameStateBehaviour : MonoBehaviour
     {
         public static GameStateBehaviour I { get; private set; }

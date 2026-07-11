@@ -215,6 +215,7 @@ namespace Virus.World
             SpawnLoot();
             SpawnGuards();
             SpawnFieldTasks();
+            BuildJamConsole();
             SpawnPlayer();
             ApplyPlayerMutator();
 
@@ -800,23 +801,26 @@ namespace Virus.World
         void SpawnLoot()
         {
             float hx = _hallW * 0.5f, hz = _hallD * 0.5f;
-            int files = S.raid.files, crates = S.raid.crates;
-            for (int i = 0; i < files + crates; i++)
+            int files = S.raid.files, crates = S.raid.crates, safes = S.raid.safes;
+            for (int i = 0; i < files + crates + safes; i++)
             {
-                bool crate = i >= files;
+                bool safe = i >= files + crates;   // сейф (вес 3): T2+, только вдвоём
+                bool crate = !safe && i >= files;
                 var pos = new Vector3(R(-hx + 8, hx - 5), 1f, R(-hz + 4, hz - 4));
                 if (pos.x < -14) pos.x = -pos.x;   // не спавним в зоне выноса
-                var go = new GameObject(crate ? "crate" : "file");
+                var go = new GameObject(safe ? "safe" : crate ? "crate" : "file");
                 go.transform.SetParent(transform, false);
                 go.transform.position = pos;
                 var col = go.AddComponent<BoxCollider>();
-                col.size = crate ? new Vector3(1.05f, 0.85f, 0.9f) : new Vector3(0.55f, 0.5f, 0.42f);
+                col.size = safe ? new Vector3(1.35f, 1.15f, 1.1f)
+                    : crate ? new Vector3(1.05f, 0.85f, 0.9f) : new Vector3(0.55f, 0.5f, 0.42f);
                 var rb = go.AddComponent<Rigidbody>();
-                rb.mass = crate ? 8 : 4;
-                var c = crate ? new Color(0.29f, 0.56f, 1f) : new Color(0.22f, 0.94f, 0.66f);
-                float value = crate ? R(16, 24) : R(7, 11);
+                rb.mass = safe ? 20 : crate ? 8 : 4;
+                var c = safe ? new Color(1f, 0.72f, 0.2f)
+                    : crate ? new Color(0.29f, 0.56f, 1f) : new Color(0.22f, 0.94f, 0.66f);
+                float value = safe ? R(34, 46) : crate ? R(16, 24) : R(7, 11);
                 // мутатор ЖИРНЫЙ КУШ: один золотой файл ×3, светится издалека
-                bool golden = _mutator == "gold" && i == _goldIndex && !crate;
+                bool golden = _mutator == "gold" && i == _goldIndex && !crate && !safe;
                 if (golden)
                 {
                     value *= 3f;
@@ -824,14 +828,24 @@ namespace Virus.World
                     go.transform.localScale = Vector3.one * 1.3f;
                     Build.Omni(go.transform, Vector3.up * 0.6f, c, 1.8f, 7f);
                 }
-                Build.MeshBox(go.transform, col.size, Mats.Neon(c, golden ? 2.2f : 0.9f), Vector3.zero);
-                var loot = new Loot { body = go.transform, rb = rb, value = value, weight = crate ? 2 : 1 };
+                if (safe)
+                {
+                    // бронированный корпус + светящаяся скважина и полосы
+                    Build.MeshBox(go.transform, col.size, Mats.Metal(new Color(0.2f, 0.18f, 0.14f), 0.45f), Vector3.zero);
+                    Build.MeshBox(go.transform, new Vector3(col.size.x + 0.04f, 0.16f, col.size.z + 0.04f), Mats.Hazard(), new Vector3(0, 0.32f, 0));
+                    Build.MeshBox(go.transform, new Vector3(col.size.x + 0.04f, 0.16f, col.size.z + 0.04f), Mats.Hazard(), new Vector3(0, -0.32f, 0));
+                    Build.MeshBox(go.transform, Vector3.one * 0.18f, Mats.Neon(c, 2.6f), new Vector3(0, 0.05f, -col.size.z * 0.5f - 0.02f));
+                }
+                else
+                    Build.MeshBox(go.transform, col.size, Mats.Neon(c, golden ? 2.2f : 0.9f), Vector3.zero);
+                var loot = new Loot { body = go.transform, rb = rb, value = value, weight = safe ? 3 : crate ? 2 : 1 };
                 _loot.Add(loot);
 
                 var it = go.AddComponent<Interactable>();
                 it.radius = 2.7f;
                 it.dynamicPrompt = () => _carried == null
                     ? (loot.carrier != 0 ? "лут у напарника"
+                        : safe ? $"[E] СЕЙФ (◈ {(int)value} · поднимать вдвоём)"
                         : $"[E] схватить лут (◈ {(int)value}{(crate ? " · тяжёлый" : "")})")
                     : "[E] положить · [F] швырнуть";
                 it.enabledFn = () => !loot.deposited &&
@@ -844,6 +858,13 @@ namespace Virus.World
         // второй носильщик рядом (кооп) заметно ускоряет тяжёлый груз
         float CarryFactorFor(Loot loot, bool helper)
         {
+            // сейф (вес 3): в одиночку — черепаший шаг, вдвоём — терпимо
+            if (loot.weight >= 3)
+            {
+                float k3 = S.HasPassive("ransomware") ? 0.3f : 0.18f;
+                if (helper) k3 = 0.52f;
+                return k3;
+            }
             float heavy = S.HasPassive("ransomware") ? 0.72f : 0.38f;
             float light = 0.78f;
             float k = loot.weight >= 2 ? heavy : light;
@@ -860,6 +881,55 @@ namespace Virus.World
             return false;
         }
 
+        // ── консоль глушения: роль «оператора» в большой стае ──
+        // Пока кто-то стоит у консоли и держит E — фоновый рост тревоги гасится
+        // (события всё равно её поднимают). Оператор занят: не носит, не воюет.
+        Transform _jamConsole;
+        Material _jamScreenMat;
+        readonly Color _jamCol = new(0.25f, 0.9f, 1f);
+        float _jamFlushT, _jamAccum;
+        bool _jamming;
+
+        void BuildJamConsole()
+        {
+            float hz = _hallD * 0.5f;
+            var root = new GameObject("jam_console").transform;
+            root.SetParent(transform, false);
+            root.localPosition = new Vector3(-2.5f, 0, -hz + 1.6f);
+            Build.Solid(root, new Vector3(1.6f, 1.15f, 0.8f), Mats.MetalDark(0.45f), new Vector3(0, 0.58f, 0));
+            _jamScreenMat = Mats.Neon(_jamCol, 0.7f);
+            var scr = Build.MeshBox(root, new Vector3(1.2f, 0.55f, 0.07f), _jamScreenMat, new Vector3(0, 1.3f, 0.12f));
+            scr.transform.localRotation = Quaternion.Euler(-26, 0, 0);
+            Build.MeshBox(root, new Vector3(1.3f, 0.06f, 0.5f), Mats.Plastic(new Color(0.1f, 0.11f, 0.13f)), new Vector3(0, 1.17f, -0.14f));
+            _jamConsole = root;
+            var it = root.gameObject.AddComponent<Interactable>();
+            it.radius = 2.6f;
+            it.dynamicPrompt = () => _jamming
+                ? "ГЛУШЕНИЕ АКТИВНО: фоновая тревога заморожена"
+                : "[E·держать] КОНСОЛЬ ГЛУШЕНИЯ: пока держишь — тревога не растёт";
+            it.enabledFn = () => !S.myBug;
+        }
+
+        void TickJam(float dt)
+        {
+            bool was = _jamming;
+            _jamming = _jamConsole != null && !S.myBug && !Frozen
+                && !UI.PuzzleUI.IsOpen && !UI.EvolutionUI.IsOpen
+                && Input.GetKey(KeyCode.E)
+                && Vector3.Distance(_player.transform.position, _jamConsole.position) < 2.6f;
+            if (_jamming)   // компенсируем фоновый creep с небольшим запасом
+                _jamAccum -= S.raid.creep * (S.evacOpen ? 1.6f : 1f) * dt * 1.1f;
+            if (_jamming != was && _jamScreenMat != null)
+                _jamScreenMat.SetColor("_EmissionColor", _jamCol * (_jamming ? 2.8f : 0.7f));
+            _jamFlushT -= dt;
+            if (_jamFlushT <= 0f)
+            {
+                _jamFlushT = 0.5f;
+                if (_jamAccum < -0.001f) { AlarmEvent(_jamAccum); _jamAccum = 0f; }
+            }
+        }
+
+
         static void SetLayerDeep(Transform t, int layer)
         {
             t.gameObject.layer = layer;
@@ -872,6 +942,12 @@ namespace Virus.World
             if (_carried == loot) { DropLoot(); return; }
             if (_carried != null) return;
             if (loot.carrier != 0 && loot.carrier != Net.NetManager.MyId) return;   // несёт напарник
+            // сейф в коопе поднимается только вдвоём (в соло — просто очень медленно)
+            if (loot.weight >= 3 && Net.NetManager.Active && !HelperNear())
+            {
+                _hud?.Toast("СЕЙФ: поднимать только вдвоём — напарник должен стоять рядом");
+                return;
+            }
             _carried = loot;
             loot.carried = true;
             loot.carrier = Net.NetManager.MyId;
@@ -1177,6 +1253,7 @@ namespace Virus.World
             TickHooked(dt);
             TickAbilities();
             TickThrow();
+            TickJam(dt);
             TickCarryAndDeposit();
             TickPadIntake();
             TickBugAndRevive(dt);

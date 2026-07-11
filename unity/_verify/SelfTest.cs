@@ -169,7 +169,10 @@ static class SelfTest
 
         // ── сохранение: сериализация → чистое состояние → загрузка ──
         s.SetFlag("door:d_tut");
+        s.SetFlag("mote:5");                     // подобранный мот — одноразовый
         s.gridNodes[7].infected = true;
+        s.gridNodes[2].failed = true;
+        s.currentNode = s.gridNodes[7];          // точка возврата в Грид
         s.resources["data_fragments"] = 123;
         s.blockPositions[2] = new UnityEngine.Vector3(1.5f, 0f, -3.25f);
         string save = s.Serialize();
@@ -182,6 +185,29 @@ static class SelfTest
         Check(restored.career["deposits"] == s.career["deposits"], "карьера восстановлена");
         Check(Math.Abs(restored.blockPositions[2].z - (-3.25f)) < 0.01f, "позиции блоков восстановлены");
         Check(!restored.Deserialize("мусор"), "битый сейв отвергнут");
+        // чекпойнт и арены: сид кампании, точка возврата, проваленные, моты
+        Check(restored.campaignSeed == s.campaignSeed, "сейв: сид кампании");
+        Check(restored.gridNodes[7].seed == s.gridNodes[7].seed, "сейв: сиды узлов (те же арены)");
+        Check(restored.currentNode != null && restored.currentNode.id == 7, "сейв: спавн у последнего узла");
+        Check(restored.gridNodes[2].failed, "сейв: проваленные узлы");
+        Check(restored.Flag("mote:5"), "сейв: мот не возродится");
+
+        // ── кооп-скейлинг: стая из 4 делает рейд жирнее и злее ──
+        var t0 = GameData.TIERS[0];
+        s.packSize = 4;
+        s.StartHack(s.gridNodes[0]);
+        Check(s.raid.quota == (int)(t0.quota * (1f + 0.4f * 3)), "стая 4: квота +120%");
+        Check(s.raid.files == t0.files + 3 && s.raid.crates == t0.crates + 1, "стая 4: больше лута");
+        Check(s.raid.creep > t0.creep, "стая 4: тревога живее");
+        Check(s.raid.safes == 0, "тир 0: без сейфов");
+        ServerNode tier2 = null;
+        foreach (var n in s.gridNodes) if (n.tier == 2 && !n.infected) { tier2 = n; break; }
+        s.StartHack(tier2);
+        Check(s.raid.safes >= 1, "тир 2: сейф на месте");
+        Check(s.raid.sensitivity == Math.Min(GameData.TIERS[2].sensitivity + 1, 4), "стая 4: больше роботов");
+        s.packSize = 1;
+        s.StartHack(s.gridNodes[0]);
+        Check(s.raid.quota == t0.quota && s.raid.files == t0.files, "соло: базовый рейд без множителей");
 
         // рекорды: данк/комбо/лучшая добыча копятся и сериализуются
         s.StartHack(s.gridNodes[1]);

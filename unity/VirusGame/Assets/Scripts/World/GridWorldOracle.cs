@@ -54,7 +54,7 @@ namespace Virus.World
                 _shield = new GameObject("shield");
                 _shield.transform.SetParent(transform, false);
                 _shield.transform.position = pos + Vector3.up * 7f;
-                var mesh = Build.MeshBox(_shield.transform, new Vector3(20, 14, 20), Mats.Neon(GameData.ORACLE, 0.25f), Vector3.zero);
+                var mesh = Build.MeshBox(_shield.transform, new Vector3(20, 14, 20), Mats.Holo(GameData.ORACLE, 0.4f), Vector3.zero);
                 mesh.GetComponent<MeshRenderer>().sharedMaterial.SetColor("_BaseColor", new Color(0.3f, 0.02f, 0.05f, 1f));
                 var col = _shield.AddComponent<BoxCollider>();
                 col.size = new Vector3(20, 14, 20);
