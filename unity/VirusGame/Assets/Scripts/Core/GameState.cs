@@ -54,6 +54,38 @@ namespace Virus.Core
         public readonly Dictionary<string, int> career = new()
             { {"deposits",0}, {"delivered",0}, {"tasks",0}, {"raids",0} };
 
+        // ── адаптивный антивирус: система «учится» на злоупотреблениях ──
+        // Счётчики копятся между рейдами; на пороге АВ выкатывает контрмеру
+        // в следующем рейде (T1+) и счётчик сбрасывается — меняй стиль!
+        public readonly Dictionary<string, int> avSeen = new()
+            { {"dunk",0}, {"jam",0}, {"morph",0}, {"decoy",0}, {"freeze",0} };
+        public const int AV_LEARN_AT = 6;
+        public string avCounter = "";   // контрмера ТЕКУЩЕГО рейда ("" — нет)
+
+        public void AvNote(string tactic, int amount = 1)
+        {
+            if (avSeen.ContainsKey(tactic)) avSeen[tactic] += amount;
+        }
+
+        // выбрать самый заезженный приём (порог достигнут) — его и контрят
+        string AvPickCounter()
+        {
+            string best = "";
+            int bestN = AV_LEARN_AT - 1;
+            foreach (var kv in avSeen)
+                if (kv.Value > bestN) { best = kv.Key; bestN = kv.Value; }
+            return best;
+        }
+
+        public static readonly Dictionary<string, string> AV_COUNTER_DESC = new()
+        {
+            ["dunk"] = "ФИЛЬТР БРОСКОВ: данки без бонуса, влетевший лут злит систему (+4 тревоги)",
+            ["jam"] = "АНТИ-ГЛУШЕНИЕ: терминал оператора давит фон вдвое слабее",
+            ["morph"] = "ЭВРИСТИКА МАСКИРОВКИ: ложный файл вскрывается через 4с",
+            ["decoy"] = "ТРАССИРОВКА ФАНТОМА: приманка живёт 2с вместо 5",
+            ["freeze"] = "ГОРЯЧИЙ РЕЗЕРВ: шифрование морозит систему лишь 1.8с",
+        };
+
         public readonly Dictionary<string, int> resources = new()
             { {"data_fragments",0}, {"code_samples",0}, {"mutagen",0}, {"ghost_tokens",0} };
 
@@ -466,6 +498,13 @@ namespace Virus.Core
                 raid.camRange *= 1.35f;
                 raid.creep *= 0.8f;
             }
+            // адаптивный АВ: обучение по заезженному приёму (обучение T0 не учится)
+            avCounter = "";
+            if (n.tier >= 1)
+            {
+                avCounter = AvPickCounter();
+                if (avCounter != "") avSeen[avCounter] = 0;   // выучил — копим заново
+            }
         }
 
         // ── тревога (не падает сама!) и фазы: SLEEP/SCAN/PURGE/WIPE ──
@@ -550,6 +589,7 @@ namespace Virus.Core
             foreach (var kv in resources) sb.Append($"res.{kv.Key}={kv.Value}\n");
             foreach (var kv in career) sb.Append($"car.{kv.Key}={kv.Value}\n");
             foreach (var kv in records) sb.Append($"rec.{kv.Key}={kv.Value}\n");
+            foreach (var kv in avSeen) sb.Append($"av.{kv.Key}={kv.Value}\n");
             var inf = new List<string>();
             foreach (var n in gridNodes) if (n.infected) inf.Add(n.id.ToString());
             sb.Append($"infected={string.Join(",", inf)}\n");
@@ -613,6 +653,8 @@ namespace Virus.Core
                             career[key.Substring(4)] = cv;
                         else if (key.StartsWith("rec.") && int.TryParse(val, out var rcv))
                             records[key.Substring(4)] = rcv;
+                        else if (key.StartsWith("av.") && int.TryParse(val, out var avv))
+                            avSeen[key.Substring(3)] = avv;
                         else if (key.StartsWith("block.") && int.TryParse(key.Substring(6), out var bid))
                         {
                             var p = val.Split(';');

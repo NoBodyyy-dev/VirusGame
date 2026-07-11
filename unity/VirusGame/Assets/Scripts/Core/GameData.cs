@@ -222,6 +222,38 @@ namespace Virus.Core
             return pool[(int)(h / 4 % (uint)pool.Count)];
         }
 
+        // ── контракты стаи: испытания кампании с наградой (доска в Гриде) ──
+        public class ContractDef
+        {
+            public string name, desc, reward;   // reward: "ресурс:количество"
+        }
+
+        public static readonly Dictionary<string, ContractDef> CONTRACTS = new()
+        {
+            ["untouched"] = new ContractDef { name = "ЧИСТЫЕ РУКИ",
+                desc = "победа в рейде без единого урона", reward = "mutagen:1" },
+            ["ghost"] = new ContractDef { name = "ПРИЗРАК",
+                desc = "победа с тревогой не выше SCAN", reward = "data_fragments:45" },
+            ["showman"] = new ContractDef { name = "ШОУМЕН",
+                desc = "3 данка за один рейд", reward = "data_fragments:30" },
+            ["courier"] = new ContractDef { name = "КУРЬЕР",
+                desc = "вынести ◈120 за один рейд", reward = "code_samples:1" },
+            ["handyman"] = new ContractDef { name = "МОНТАЖНИК",
+                desc = "2 полевые задачи за один рейд", reward = "data_fragments:25" },
+        };
+
+        // название награды человеком: "mutagen:1" → "✦1 мутаген"
+        public static string RewardLabel(string reward)
+        {
+            var p = (reward ?? "").Split(':');
+            if (p.Length != 2) return reward;
+            string icon = p[0] switch
+            {
+                "mutagen" => "✦", "code_samples" => "◇", _ => "◈",
+            };
+            return $"{icon}{p[1]}";
+        }
+
         // ── тиры узлов (T0 обучающий → T3 военные) ──
         public static readonly Tier[] TIERS =
         {

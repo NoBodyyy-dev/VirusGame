@@ -270,6 +270,10 @@ namespace Virus.World
                     Build.MeshBox(root, new Vector3(1.3f, 0.12f, 0.05f), Mats.Plastic(new Color(0.1f, 0.11f, 0.13f)), new Vector3(-0.05f, 0.55f + k * 0.35f, 0.64f));
                 Build.MeshBox(root, new Vector3(0.5f, 0.5f, 0.5f), Mats.Neon(col, 1.2f), new Vector3(0, h + 0.35f, 0));
                 if (unlocked && !infected) Build.Omni(root, new Vector3(0, h + 0.6f, 0), col, 1.1f, 7f);
+                // метка архетипа: цветной маячок — маршрут можно планировать издалека
+                if (n.arch != "" && !infected)
+                    Build.MeshBox(root, new Vector3(0.26f, 0.26f, 0.26f),
+                        Mats.Neon(GameData.ARCHETYPES[n.arch].color, 1.8f), new Vector3(0, h + 0.85f, 0));
 
                 if (!infected)
                 {

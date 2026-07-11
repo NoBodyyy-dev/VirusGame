@@ -38,6 +38,7 @@ namespace Virus.World
             public bool hot;             // горячий пакет: греется в руках — эстафета [F]
             public float heat;
             public bool hotWarned;
+            public bool mimic;           // приманка: при подборе прыгает на игрока
             public Material mat;         // эмиссия горячего: жёлтый → алый
             public int carrier;          // кооп: id носильщика (0 — свободен)
             public Vector3 netPos;       // кооп: позиция от чужого носильщика
@@ -107,6 +108,11 @@ namespace Virus.World
         int _scanPhase;                              // 0 тихо · 1 отсчёт · 2 скан
         bool _scanBusted;
         Material _scanMat;
+
+        // ── мимик и сводка неприятностей рейда (для экрана результатов) ──
+        GameObject _mimic;                           // краб, вцепившийся в игрока
+        float _mimicSince, _jamNoted, _morphAt;
+        int _statFragileBroken, _statOverheats, _statMimics;
 
         float _trapTimer, _hitLock, _reviveT;
         int _phaseSeen;
@@ -277,6 +283,8 @@ namespace Virus.World
                     _hud.Toast($"{GameData.ARCHETYPES[_arch].name} — {GameData.ARCHETYPES[_arch].twist}");
                 if (S.raid.hot > 0)
                     _hud.Toast("ГОРЯЧИЕ ПАКЕТЫ в хранилище: греются в руках — сбрасывай или перекидывай [F] по цепочке!");
+                if (S.avCounter != "")
+                    _hud.Toast($"⚠ {S.raid.av} ИЗУЧИЛ ВАС — {GameState.AV_COUNTER_DESC[S.avCounter]}");
             }
             // атмосфера: мотыльки данных по залу, вихрь над зоной выноса,
             // отражения неона на полу (probe вместо тяжёлого SSR)
@@ -883,8 +891,13 @@ namespace Virus.World
                 // хрупкий лут (T1+): дороже, но бьётся от ударов — не швырять!
                 bool fragile = !hot && !safe && S.raid.tier >= 1 && _rng.NextDouble() < 0.26;
                 if (fragile) value *= 1.4f;
+                // мимик-приманка (T1+): выглядит как файл, при подборе кусает.
+                // В почтовом узле спам-фауна злее. Spyware видит красную метку.
+                bool mimic = !hot && !safe && !crate && !fragile && S.raid.tier >= 1
+                    && _rng.NextDouble() < (_arch == "mail" ? 0.2 : 0.1);
                 // мутатор ЖИРНЫЙ КУШ: один золотой файл ×3, светится издалека
                 bool golden = _mutator == "gold" && i == _goldIndex && !crate && !safe && !hot;
+                if (golden) mimic = false;   // золотой куш всегда настоящий
                 if (golden)
                 {
                     value *= 3f;
@@ -919,11 +932,13 @@ namespace Virus.World
                 {
                     body = go.transform, rb = rb, value = value, value0 = value,
                     weight = safe ? 3 : crate ? 2 : 1,
-                    fragile = fragile, hot = hot, mat = hotMat,
+                    fragile = fragile, hot = hot, mat = hotMat, mimic = mimic,
                 };
                 _loot.Add(loot);
                 if (fragile)
                     go.AddComponent<FragileWatch>().onImpact = v => OnFragileImpact(loot, v);
+                if (mimic && S.HasPassive("spyware"))
+                    Build.Omni(go.transform, Vector3.up * 0.5f, new Color(1f, 0.25f, 0.2f), 1.2f, 3.5f);
 
                 var it = go.AddComponent<Interactable>();
                 it.radius = 2.7f;
@@ -956,6 +971,7 @@ namespace Virus.World
             if (l.value <= l.value0 * 0.35f)
             {
                 l.deposited = true;   // осколки не подобрать
+                _statFragileBroken++;
                 AlarmEvent(8f);
                 _flashCol = new Color(1f, 0.5f, 0.6f);
                 _flashA = 0.3f;
@@ -1204,8 +1220,15 @@ namespace Virus.World
         {
             bool was = _jamming;
             _jamming = _opMode && !S.myBug && !Frozen;
-            if (_jamming)   // компенсируем фоновый creep с небольшим запасом
-                _jamAccum -= S.raid.creep * (S.evacOpen ? 1.6f : 1f) * dt * 1.1f;
+            if (_jamming)
+            {
+                // компенсируем фоновый creep с запасом; АВ с анти-глушением
+                // давит вдвое слабее. Злоупотребление копит обучение системы.
+                float k = S.avCounter == "jam" ? 0.55f : 1.1f;
+                _jamAccum -= S.raid.creep * (S.evacOpen ? 1.6f : 1f) * dt * k;
+                _jamNoted += dt;
+                if (_jamNoted >= 10f) { _jamNoted = 0f; S.AvNote("jam"); }
+            }
             if (_jamming != was && _jamScreenMat != null)
                 _jamScreenMat.SetColor("_EmissionColor", _jamCol * (_jamming ? 2.8f : 0.7f));
             _jamFlushT -= dt;
@@ -1439,9 +1462,11 @@ namespace Virus.World
         void ToggleCarry(Loot loot)
         {
             if (S.myBug) return;
+            if (_mimic != null) { _hud?.Toast("Сначала стряхни мимика [F]!"); return; }
             if (_carried == loot) { DropLoot(); return; }
             if (_carried != null) return;
             if (loot.carrier != 0 && loot.carrier != Net.NetManager.MyId) return;   // несёт напарник
+            if (loot.mimic) { TriggerMimic(loot); return; }   // приманка кусается
             // сейф в коопе поднимается только вдвоём (в соло — просто очень медленно)
             if (loot.weight >= 3 && Net.NetManager.Active && !HelperNear())
             {
@@ -1759,6 +1784,7 @@ namespace Virus.World
             TickOperator(dt);
             TickArchetype(dt);
             TickHeat(dt);
+            TickAdaptive(dt);
             TickCarryAndDeposit();
             TickPadIntake();
             TickBugAndRevive(dt);
@@ -2476,25 +2502,35 @@ namespace Virus.World
             {
                 case "morph":
                     _player.SetMorph(true);
-                    _hud?.Toast("ЛОЖНЫЙ ФАЙЛ: замри — роботы тебя не видят. Движение снимает морф");
+                    _morphAt = now;
+                    S.AvNote("morph");
+                    _hud?.Toast(S.avCounter == "morph"
+                        ? "ЛОЖНЫЙ ФАЙЛ: эвристика АВ вскроет тебя через 4с!"
+                        : "ЛОЖНЫЙ ФАЙЛ: замри — роботы тебя не видят. Движение снимает морф");
                     break;
                 case "dash":
                     _player.Dash();
                     _hud?.Toast("РЫВОК!");
                     break;
                 case "freeze":
-                    _frozenUntil = now + 3f;
-                    _hud?.Toast("ШИФРОВАНИЕ: система и ловушки заморожены (3с)");
+                    S.AvNote("freeze");
+                    _frozenUntil = now + (S.avCounter == "freeze" ? 1.8f : 3f);
+                    _hud?.Toast(S.avCounter == "freeze"
+                        ? "ШИФРОВАНИЕ: горячий резерв АВ — заморозка лишь 1.8с"
+                        : "ШИФРОВАНИЕ: система и ловушки заморожены (3с)");
                     break;
                 case "xray":
                     StartCoroutine(XRay(6f));
                     _hud?.Toast("СКАН: лут и угрозы подсвечены (6с)");
                     break;
                 case "decoy":
-                    _decoyUntil = now + 5f;
+                    S.AvNote("decoy");
+                    _decoyUntil = now + (S.avCounter == "decoy" ? 2f : 5f);
                     _decoyPos = _player.transform.position + _player.LookDir() * 4f + Vector3.up * 1.2f;
                     SpawnDecoyGhost(_decoyPos);
-                    _hud?.Toast("ФАНТОМ: ловушки ведутся (5с)");
+                    _hud?.Toast(S.avCounter == "decoy"
+                        ? "ФАНТОМ: АВ трассирует приманку — лишь 2с"
+                        : "ФАНТОМ: ловушки ведутся (5с)");
                     break;
                 case "jam":
                     AlarmEvent(-12f);
@@ -2655,10 +2691,58 @@ namespace Virus.World
             }
         }
 
+        // ── мимик: файл оказался живым — вцепился, сосёт BW, тормозит ──
+        void TriggerMimic(Loot l)
+        {
+            l.deposited = true;   // «файл» выбыл из лута навсегда
+            int idx = _loot.IndexOf(l);
+            if (l.body != null) Destroy(l.body.gameObject);
+            if (_coop && idx >= 0)
+                Net.NetManager.Send(NetSync.MsgLootGone(_netScene, idx));
+            AlarmEvent(4f);
+            Sfx.Play("trap", 0.4f);
+            _player.Shake(0.55f);
+            _player.SetMorph(false);
+            _flashCol = new Color(1f, 0.45f, 0.2f);
+            _flashA = 0.35f;
+            _mimicSince = Time.time;
+            _mimic = Player.VirusModel.BuildBug(_player.transform, new Color(1f, 0.4f, 0.2f));
+            _mimic.transform.localPosition = new Vector3(0, 2.05f, 0);
+            _mimic.transform.localScale = Vector3.one * 0.7f;
+            _hud?.Toast("ЭТО МИМИК! Вцепился и сосёт BW — стряхни его [F]!");
+        }
+
+        // адаптивный АВ (вскрытие морфа) и жизнь мимика на загривке
+        void TickAdaptive(float dt)
+        {
+            if (S.avCounter == "morph" && _player.Morphed && Time.time - _morphAt > 4f)
+            {
+                _player.SetMorph(false);
+                AlarmEvent(3f);
+                _hud?.Toast("ЭВРИСТИКА АВ вскрыла ложный файл: тревога +3");
+            }
+            if (_mimic != null)
+            {
+                S.bandwidth = Mathf.Max(S.bandwidth - 3f * dt, 0f);
+                _player.slowUntil = Time.time + 0.3f;
+                if (Input.GetKeyDown(KeyCode.F) && _carried == null && Time.time - _mimicSince > 1.2f
+                    && !UI.PuzzleUI.IsOpen && !UI.EvolutionUI.IsOpen && !UI.PauseMenu.IsOpen)
+                {
+                    Destroy(_mimic);
+                    _mimic = null;
+                    _statMimics++;
+                    AlarmEvent(2f);
+                    Sfx.Play("ability", 0.3f);
+                    _hud?.Toast("Мимик стряхнут и раздавлен. Фу.");
+                }
+            }
+        }
+
         void Overheat(Loot l)
         {
             l.heat = 55f;          // остаётся горячим — не поднять и бежать дальше
             l.hotWarned = false;
+            _statOverheats++;
             l.value *= 0.85f;
             AlarmEvent(7f);
             DropLoot();
@@ -2680,14 +2764,19 @@ namespace Virus.World
                 bool dunk = l.rb != null && !l.rb.isKinematic && l.rb.linearVelocity.magnitude > 4f;
                 l.deposited = true;
                 if (l.fake) { SpamBusted(l, i); continue; }
-                if (dunk) S.lastDunks++;
-                float got = S.DepositValue(l.value * (dunk ? 1.15f : 1f));
+                // адаптивный АВ выучил данки: бонуса нет, бросок злит систему
+                bool countered = dunk && S.avCounter == "dunk";
+                if (dunk) { S.lastDunks++; S.AvNote("dunk"); }
+                float got = S.DepositValue(l.value * (dunk && !countered ? 1.15f : 1f));
+                if (countered) AlarmEvent(4f);
                 Destroy(l.body.gameObject);
                 if (_coop)
                     Net.NetManager.Send(NetSync.MsgLootDeposit(_netScene, i, S.access));
                 string combo = S.ComboCount > 1 ? $"  КОМБО ×{S.ComboMult:0.0}" : "";
                 Sfx.Play(dunk ? "win" : "deposit", dunk ? 0.4f : 0.4f);
-                _hud?.Toast(dunk
+                _hud?.Toast(countered
+                    ? $"ФИЛЬТР БРОСКОВ: ◈ +{(int)got} без бонуса, тревога +4{combo}"
+                    : dunk
                     ? $"ТРЁХОЧКОВЫЙ! ◈ +{(int)got} (+15% за бросок){combo}"
                     : $"◈ +{(int)got} — в зоне выноса!{combo}");
                 if (!S.evacOpen && S.access >= 100f) OpenEvac(false);
@@ -2810,7 +2899,8 @@ namespace Virus.World
             UI.UIKit.Panel(card.transform, new Vector2(0.5f, 1), new Vector2(0, -4), new Vector2(632, 5),
                 new Color(accent.r, accent.g, accent.b, 0.9f));
             MakeUiText(card.transform, victory ? "СЕРВЕР ВЗЛОМАН" : "РЕЙД ПРОВАЛЕН", new Vector2(0, 120), 42, accent);
-            MakeUiText(card.transform, reason, new Vector2(0, 62), 21, new Color(0.88f, 0.95f, 1f));
+            string archName = _arch != "" ? $"{GameData.ARCHETYPES[_arch].name} · " : "";
+            MakeUiText(card.transform, $"{archName}{reason}", new Vector2(0, 62), 21, new Color(0.88f, 0.95f, 1f));
             string dunks = S.lastDunks > 0 ? $" · данков: {S.lastDunks}" : "";
             string combo = S.lastBestCombo > 1 ? $" · комбо ×{S.lastBestCombo}" : "";
             MakeUiText(card.transform, $"Вынесено ◈{S.lastDelivered} за {S.lastDeposits} ходок{dunks}{combo}",
@@ -2827,6 +2917,16 @@ namespace Virus.World
             MakeUiText(card.transform,
                 $"Карьера: {S.career["deposits"]} вносов · {S.career["tasks"]} задач · {S.career["raids"]} рейдов · ◈{S.career["delivered"]} всего",
                 new Vector2(0, -38), 16, new Color(0.55f, 0.65f, 0.75f));
+            // сводка неприятностей — есть чем оправдаться перед стаей
+            if (_statFragileBroken + _statOverheats + _statMimics > 0)
+            {
+                var bits = new List<string>();
+                if (_statFragileBroken > 0) bits.Add($"разбито хрупких: {_statFragileBroken}");
+                if (_statOverheats > 0) bits.Add($"перегревов: {_statOverheats}");
+                if (_statMimics > 0) bits.Add($"мимиков стряхнуто: {_statMimics}");
+                MakeUiText(card.transform, string.Join(" · ", bits), new Vector2(0, -64), 15,
+                    new Color(1f, 0.6f, 0.4f));
+            }
             UI.UIKit.MakeButton(card.transform, "ВЕРНУТЬСЯ В ГРИД", new Vector2(0, -110), new Vector2(380, 56),
                 () => { Debug.Log("[UI] results->grid click"); App.SceneFlow.GoGrid(); }, GameData.INFECTED);
             MakeUiText(card.transform, "клик · Enter · Пробел", new Vector2(0, -160), 14, new Color(0.45f, 0.55f, 0.65f));

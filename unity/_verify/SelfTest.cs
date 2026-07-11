@@ -249,6 +249,25 @@ static class SelfTest
         s.StartHack(s.gridNodes[0]);
         Check(s.raid.quota == t0.quota && s.raid.files == t0.files, "соло: базовый рейд без множителей");
 
+        // ── адаптивный АВ: учится на заезженном приёме, T0 не контрит ──
+        s.avSeen["dunk"] = GameState.AV_LEARN_AT;
+        s.StartHack(tier2);
+        Check(s.avCounter == "dunk", "АВ выучил данки на пороге");
+        Check(s.avSeen["dunk"] == 0, "счётчик приёма сброшен после обучения");
+        Check(GameState.AV_COUNTER_DESC.ContainsKey("dunk"), "у контрмеры есть описание");
+        s.StartHack(tier2);
+        Check(s.avCounter == "", "без злоупотреблений контрмеры нет");
+        s.avSeen["jam"] = GameState.AV_LEARN_AT + 2;
+        s.StartHack(s.gridNodes[0]);
+        Check(s.avCounter == "", "обучение T0: АВ не адаптируется");
+        Check(s.avSeen["jam"] == GameState.AV_LEARN_AT + 2, "T0 не тратит накопленное обучение");
+        s.avSeen["morph"] = 3;
+        var avRestored = new GameState();
+        avRestored.Deserialize(s.Serialize());
+        Check(avRestored.avSeen["morph"] == 3 && avRestored.avSeen["jam"] == s.avSeen["jam"],
+            "обучение АВ переживает сейв");
+        s.avSeen["jam"] = 0; s.avSeen["morph"] = 0;
+
         // рекорды: данк/комбо/лучшая добыча копятся и сериализуются
         s.StartHack(s.gridNodes[1]);
         s.lastDunks = 2;
