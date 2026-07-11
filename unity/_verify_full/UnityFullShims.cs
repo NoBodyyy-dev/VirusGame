@@ -254,6 +254,9 @@ namespace UnityEngine
     {
         public MaterialGlobalIlluminationFlags globalIlluminationFlags;
         public Color color;
+        public Texture mainTexture;
+        public Shader shader;
+        public int renderQueue;
         public Material(Shader s) { }
         public Material(Material src) { }
         public void SetFloat(string k, float v) { }
@@ -442,6 +445,7 @@ namespace UnityEngine
         public static float time => 0f;
         public static float unscaledTime => 0f;
         public static float unscaledDeltaTime => 0.016f;
+        public static float timeScale = 1f;
     }
 
     public enum KeyCode { None, Escape, Tab, Space, Return, E, F, Q, X, C, R, LeftShift, LeftControl, Alpha1, Alpha2, Alpha3 }

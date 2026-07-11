@@ -30,7 +30,7 @@ namespace Virus.Util
 
         void Update()
         {
-            if (UI.PuzzleUI.IsOpen || UI.EvolutionUI.IsOpen) { setPrompt?.Invoke(""); return; }
+            if (UI.PuzzleUI.IsOpen || UI.EvolutionUI.IsOpen || UI.PauseMenu.IsOpen) { setPrompt?.Invoke(""); return; }
             if (player == null)
             {
                 var p = FindFirstObjectByType<Player.VirusPlayer>();

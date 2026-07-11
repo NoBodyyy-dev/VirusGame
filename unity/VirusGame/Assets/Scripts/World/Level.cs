@@ -239,6 +239,26 @@ namespace Virus.World
             BuildPadArrow();
             BuildMinimap();
             StartCoroutine(EnterAnimation());
+
+            // автотест полного цикла: победа → возврат в Грид (ловля глюков перехода)
+            if (System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-autowin") >= 0)
+                StartCoroutine(AutoWin());
+        }
+
+        System.Collections.IEnumerator AutoWin()
+        {
+            yield return new WaitForSeconds(8f);
+            S.access = 100f;
+            Finish(true, "автотест перехода");
+            yield return new WaitForSeconds(2f);
+            App.SceneFlow.GoGrid();
+        }
+
+        // покинуть рейд из паузы: считается провалом, дальше экран результатов
+        public void Abort()
+        {
+            if (_done) return;
+            Finish(false, "Рейд прерван — стая отступила");
         }
 
         // ── мини-карта: игрок/портал/лут/роботы точками (правый верх) ──
@@ -1149,7 +1169,7 @@ namespace Virus.World
         void TickThrow()
         {
             if (_carried == null || !Input.GetKeyDown(KeyCode.F)) return;
-            if (UI.PuzzleUI.IsOpen || UI.EvolutionUI.IsOpen) return;
+            if (UI.PuzzleUI.IsOpen || UI.EvolutionUI.IsOpen || UI.PauseMenu.IsOpen) return;
             var l = _carried;
             DropLoot();
             var v = _player.LookDir() * 10f + Vector3.up * 4.5f;
@@ -1797,7 +1817,7 @@ namespace Virus.World
         // ── активки [Q]/[X]/[C] за Bandwidth ──
         void TickAbilities()
         {
-            if (UI.PuzzleUI.IsOpen || UI.EvolutionUI.IsOpen) return;
+            if (UI.PuzzleUI.IsOpen || UI.EvolutionUI.IsOpen || UI.PauseMenu.IsOpen) return;
             if (Input.GetKeyDown(KeyCode.Q)) UseAbility(0);
             if (Input.GetKeyDown(KeyCode.X)) UseAbility(1);
             if (Input.GetKeyDown(KeyCode.C)) UseAbility(2);

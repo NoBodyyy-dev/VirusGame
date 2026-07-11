@@ -17,7 +17,7 @@ namespace Virus.App
 
         void Update()
         {
-            _t -= Time.deltaTime;
+            _t -= Time.unscaledDeltaTime;   // работает и на паузе (timeScale 0)
             if (_t <= 0f && _n < 5)
             {
                 _t = 6f;

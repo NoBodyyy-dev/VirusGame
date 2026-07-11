@@ -136,7 +136,7 @@ namespace Virus.UI
             }
             else
             {
-                _title.text = "СЕТЬ ГРИДА · зачисти зону — откроется следующая";
+                _title.text = "СЕТЬ ГРИДА";
                 _gridBar.Set(s.TotalNodes() > 0 ? (float)s.InfectedTotal() / s.TotalNodes() : 0f);
                 _gridBar.value.text = $"{s.InfectedTotal()} / {s.TotalNodes()}";
                 _res.text = resLine;

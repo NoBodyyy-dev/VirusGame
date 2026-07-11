@@ -80,6 +80,24 @@ namespace Virus.Util
             }
         }
 
+        // Материал текста с честным ZTest: не просвечивает сквозь стены
+        // (встроенный GUI/Text Shader рисует поверх всей геометрии).
+        static Material _worldTextMat;
+        static Material WorldTextMat
+        {
+            get
+            {
+                if (_worldTextMat == null)
+                {
+                    var sh = Shader.Find("Virus/WorldText");
+                    if (sh != null && UIFont != null) _worldTextMat = new Material(sh);
+                }
+                if (_worldTextMat != null && UIFont != null)
+                    _worldTextMat.mainTexture = UIFont.material.mainTexture;   // атлас мог перестроиться
+                return _worldTextMat;
+            }
+        }
+
         // 3D-метка в мире (порт Label3D) на legacy TextMesh.
         public static TextMesh Label(Transform parent, string text, Vector3 pos, float size,
                                      Color color, bool billboard = true)
@@ -96,7 +114,7 @@ namespace Virus.Util
             tm.alignment = TextAlignment.Center;
             tm.color = color;
             var mr = go.GetComponent<MeshRenderer>();
-            if (mr != null && UIFont != null) mr.sharedMaterial = UIFont.material;
+            if (mr != null && UIFont != null) mr.sharedMaterial = WorldTextMat != null ? WorldTextMat : UIFont.material;
             if (billboard) go.AddComponent<Billboard>();
             return tm;
         }

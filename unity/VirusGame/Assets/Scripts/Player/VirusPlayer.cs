@@ -135,11 +135,11 @@ namespace Virus.Player
         {
             EnsureModel();
 
-            // курсор: ESC — отпустить, клик — снова захватить
-            if (Input.GetKeyDown(KeyCode.Escape) && !UI.EvolutionUI.IsOpen && !UI.PuzzleUI.IsOpen)
-            { Cursor.lockState = CursorLockMode.None; Cursor.visible = true; }
+            // ESC — меню паузы (панели закрывают себя сами); клик — вернуть захват курсора
+            if (Input.GetKeyDown(KeyCode.Escape) && !UI.EvolutionUI.IsOpen && !UI.PuzzleUI.IsOpen && !UI.PauseMenu.IsOpen)
+                UI.PauseMenu.Toggle();
             else if (Input.GetMouseButtonDown(0) && Cursor.lockState != CursorLockMode.Locked
-                     && !UI.EvolutionUI.IsOpen && !UI.PuzzleUI.IsOpen)
+                     && !UI.EvolutionUI.IsOpen && !UI.PuzzleUI.IsOpen && !UI.PauseMenu.IsOpen)
             { Cursor.lockState = CursorLockMode.Locked; Cursor.visible = false; }
 
             bool look = controlEnabled && Cursor.lockState == CursorLockMode.Locked;

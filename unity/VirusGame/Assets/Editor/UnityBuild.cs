@@ -227,6 +227,7 @@ namespace Virus.EditorTools
             // DontSave-ресурсы, Unity кладёт их в билд сам; форсить их нельзя.
             RemoveShaderIncluded("GUI/Text Shader");
             EnsureShaderIncluded("Standard");
+            EnsureShaderIncluded("Virus/WorldText");   // текст в мире с ZTest
             EnsureShaderIncluded("Skybox/Procedural");   // ночное небо (Shader.Find в рантайме)
             SetupScene();
             var dir = Path.GetFullPath("../Build");

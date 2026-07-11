@@ -78,7 +78,7 @@ namespace Virus.World
         void Update()
         {
             // дерево эволюции: Tab открывает/закрывает (закрытие — внутри UI)
-            if (Input.GetKeyDown(KeyCode.Tab) && !UI.PuzzleUI.IsOpen && !UI.EvolutionUI.IsOpen)
+            if (Input.GetKeyDown(KeyCode.Tab) && !UI.PuzzleUI.IsOpen && !UI.EvolutionUI.IsOpen && !UI.PauseMenu.IsOpen)
                 UI.EvolutionUI.Toggle();
 
             _knockLock = Mathf.Max(_knockLock - Time.deltaTime, 0f);
