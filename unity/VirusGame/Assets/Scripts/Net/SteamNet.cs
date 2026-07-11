@@ -55,6 +55,9 @@ namespace Virus.Net
                 r => SteamNetworking.AcceptP2PSessionWithUser(r.m_steamIDRemote));
             _cbP2PFail = Callback<P2PSessionConnectFail_t>.Create(OnP2PFail);
             _crLobbyList = CallResult<LobbyMatchList_t>.Create(OnLobbyList);
+            // строгий NAT: разрешаем ретрансляцию через серверы Steam —
+            // иначе часть пар «хост-клиент» не пробьёт прямое P2P
+            SteamNetworking.AllowP2PPacketRelay(true);
             Debug.Log("[SteamNet] Steam инициализирован: " + SteamFriends.GetPersonaName());
         }
 

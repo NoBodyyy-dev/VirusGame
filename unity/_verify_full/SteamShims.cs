@@ -76,5 +76,6 @@ namespace Steamworks
         public static bool ReadP2PPacket(byte[] dest, uint destLen, out uint read, out CSteamID remote, int channel = 0)
         { read = 0; remote = CSteamID.Nil; return false; }
         public static bool AcceptP2PSessionWithUser(CSteamID remote) => true;
+        public static bool AllowP2PPacketRelay(bool allow) => true;
     }
 }
