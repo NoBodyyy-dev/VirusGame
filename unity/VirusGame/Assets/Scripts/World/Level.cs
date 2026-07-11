@@ -446,13 +446,34 @@ namespace Virus.World
                 _padArrow.rotation = Quaternion.LookRotation(dir);
         }
 
-        // ── анимация захода в сервер: тьма → вспышка кода → игра ──
+        // ── брифинг-карточка входа: узел, архетип, контрмера АВ, контракты.
+        // Все новые системы собраны в один читаемый момент — каждый рейд
+        // начинается как событие, а не как загрузка.
+        Text MakeBriefText(Transform parent, string s, Vector2 pos, int size, Color c)
+        {
+            var go = new GameObject("brief", typeof(RectTransform));
+            go.transform.SetParent(parent, false);
+            var t = go.AddComponent<Text>();
+            t.font = Build.UIFont;
+            t.fontSize = size;
+            t.alignment = TextAnchor.MiddleCenter;
+            t.color = c;
+            t.horizontalOverflow = HorizontalWrapMode.Overflow;
+            t.rectTransform.anchoredPosition = pos;
+            t.rectTransform.sizeDelta = new Vector2(1400, 60);
+            t.text = s;
+            return t;
+        }
+
         IEnumerator EnterAnimation()
         {
             var canvasGo = new GameObject("Fade", typeof(Canvas), typeof(CanvasScaler));
             var canvas = canvasGo.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             canvas.sortingOrder = 90;
+            var scaler = canvasGo.GetComponent<CanvasScaler>();
+            scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            scaler.referenceResolution = new Vector2(1600, 900);
             var go = new GameObject("dim", typeof(RectTransform));
             go.transform.SetParent(canvasGo.transform, false);
             _fade = go.AddComponent<Image>();
@@ -461,25 +482,39 @@ namespace Virus.World
             rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
             _fade.color = new Color(0.0f, 0.01f, 0.02f, 1f);
 
-            var txtGo = new GameObject("txt", typeof(RectTransform));
-            txtGo.transform.SetParent(canvasGo.transform, false);
-            var txt = txtGo.AddComponent<Text>();
-            txt.font = Build.UIFont;
-            txt.fontSize = 30;
-            txt.alignment = TextAnchor.MiddleCenter;
-            txt.color = GameData.INFECTED;
-            txt.horizontalOverflow = HorizontalWrapMode.Overflow;
-            txt.rectTransform.sizeDelta = new Vector2(1200, 60);
-            string archName = _arch != "" ? GameData.ARCHETYPES[_arch].name + " · " : "";
-            txt.text = $">> инъекция в {S.raid.name} · {archName}обход {S.raid.av}…";
+            var texts = new List<Text>
+            {
+                MakeBriefText(canvasGo.transform, $">> инъекция в {S.raid.name} · {GameData.TIERS[S.raid.tier].shortName} · обход {S.raid.av}",
+                    new Vector2(0, 120), 26, GameData.INFECTED),
+            };
+            if (_arch != "")
+            {
+                var a = GameData.ARCHETYPES[_arch];
+                texts.Add(MakeBriefText(canvasGo.transform, a.name, new Vector2(0, 58), 46, a.color));
+                texts.Add(MakeBriefText(canvasGo.transform, a.twist, new Vector2(0, 14), 18,
+                    new Color(0.8f, 0.9f, 1f)));
+            }
+            if (S.avCounter != "")
+                texts.Add(MakeBriefText(canvasGo.transform, "⚠ АВ ИЗУЧИЛ ВАС: " + GameState.AV_COUNTER_DESC[S.avCounter],
+                    new Vector2(0, -34), 18, new Color(1f, 0.6f, 0.3f)));
+            var open = new List<string>();
+            foreach (var cid in S.contracts)
+                if (!S.contractsDone.Contains(cid))
+                    open.Add($"{GameData.CONTRACTS[cid].name} ({GameData.RewardLabel(GameData.CONTRACTS[cid].reward)})");
+            if (open.Count > 0)
+                texts.Add(MakeBriefText(canvasGo.transform, "Контракты стаи: " + string.Join(" · ", open),
+                    new Vector2(0, -76), 15, new Color(0.6f, 0.7f, 0.8f)));
 
+            const float dur = 2.4f;
             float t = 0f;
-            while (t < 1.4f)
+            while (t < dur)
             {
                 t += Time.deltaTime;
-                float k = Mathf.Clamp01(t / 1.4f);
-                _fade.color = new Color(0, 0.01f, 0.02f, 1f - k);
-                txt.color = new Color(GameData.INFECTED.r, GameData.INFECTED.g, GameData.INFECTED.b, 1f - k * k);
+                float dim = 1f - Mathf.Clamp01(t / 1.5f) * 0.999f;      // фон уходит раньше
+                float txtA = 1f - Mathf.Clamp01((t - 1.5f) / (dur - 1.5f)); // текст держится дольше
+                _fade.color = new Color(0, 0.01f, 0.02f, dim * 0.92f);
+                foreach (var tx in texts)
+                    tx.color = new Color(tx.color.r, tx.color.g, tx.color.b, txtA);
                 yield return null;
             }
             Destroy(canvasGo);
@@ -1603,15 +1638,31 @@ namespace Virus.World
             bool used = false;
             var it = root.gameObject.AddComponent<Interactable>();
             it.radius = 3f;
-            it.holdSeconds = 3f;
-            it.prompt = "[E·держать] СЕРВИСНАЯ КОНСОЛЬ: откалибровать (тревога −8)";
             it.enabledFn = () => !used && !S.myBug;
-            it.onInteract = () =>
+            // T1+ половина консолей требует мини-взлом из пула головоломок —
+            // рискованно (ловушки летят, пока ковыряешься), зато интереснее
+            bool puzzled = S.raid.tier >= 1 && _rng.NextDouble() < 0.5;
+            void Done()
             {
                 used = true;
                 led.GetComponent<MeshRenderer>().sharedMaterial = Mats.Neon(new Color(0.4f, 0.42f, 0.45f), 0.4f);
                 TaskDone("Консоль откалибрована");
-            };
+            }
+            if (puzzled)
+            {
+                it.prompt = "[E] СЕРВИСНАЯ КОНСОЛЬ: мини-взлом (тревога −8, система не ждёт!)";
+                it.onInteract = () =>
+                {
+                    if (used) return;
+                    UI.PuzzleUI.Open(Mathf.Min(S.raid.tier + 1, 4), "ВЗЛОМ СЕРВИСНОЙ КОНСОЛИ", Done);
+                };
+            }
+            else
+            {
+                it.holdSeconds = 3f;
+                it.prompt = "[E·держать] СЕРВИСНАЯ КОНСОЛЬ: откалибровать (тревога −8)";
+                it.onInteract = Done;
+            }
         }
 
         // двойной рубильник: второй надо дёрнуть за 6 секунд после первого
@@ -1762,6 +1813,8 @@ namespace Virus.World
             TickCoop(dt);
             // тревога ползёт сама (у не-директора её ведёт директор через RAS)
             if (_director) S.ApplyAlarm(S.raid.creep * (S.evacOpen ? 1.6f : 1f) * dt);
+            // пик тревоги для контракта «ПРИЗРАК» (ловит и синк от директора)
+            if (S.alarm > S.lastMaxAlarm) S.lastMaxAlarm = S.alarm;
             TickPhaseFx();
             if (!Frozen)
             {
@@ -2621,6 +2674,7 @@ namespace Virus.World
             if (_hitLock > 0f || S.myBug || _done) return;
             if (_opMode) ExitOperator();   // оператора выбило из терминала
             _hitLock = 1.2f;
+            S.lastHits++;                  // контракт «ЧИСТЫЕ РУКИ» сорван
             S.myHp = Mathf.Max(S.myHp - dmg, 0);
             // rootkit бесшумный: система слышит удар вдвое тише
             AlarmEvent(S.HasPassive("rootkit") ? 1f : 2f);
@@ -2894,7 +2948,7 @@ namespace Virus.World
 
             // карточка результата на UIKit
             var card = UI.UIKit.Panel(canvasGo.transform, new Vector2(0.5f, 0.5f), Vector2.zero,
-                new Vector2(640, 380), UI.UIKit.PanelBg2);
+                new Vector2(640, 440), UI.UIKit.PanelBg2);
             var accent = victory ? GameData.INFECTED : new Color(1f, 0.3f, 0.4f);
             UI.UIKit.Panel(card.transform, new Vector2(0.5f, 1), new Vector2(0, -4), new Vector2(632, 5),
                 new Color(accent.r, accent.g, accent.b, 0.9f));
@@ -2927,9 +2981,18 @@ namespace Virus.World
                 MakeUiText(card.transform, string.Join(" · ", bits), new Vector2(0, -64), 15,
                     new Color(1f, 0.6f, 0.4f));
             }
-            UI.UIKit.MakeButton(card.transform, "ВЕРНУТЬСЯ В ГРИД", new Vector2(0, -110), new Vector2(380, 56),
+            // выполненные контракты доски — золотая строка с наградой
+            if (S.lastContractsDone.Count > 0)
+            {
+                var cbits = new List<string>();
+                foreach (var id in S.lastContractsDone)
+                    cbits.Add($"{GameData.CONTRACTS[id].name} ({GameData.RewardLabel(GameData.CONTRACTS[id].reward)})");
+                MakeUiText(card.transform, "КОНТРАКТ ВЫПОЛНЕН: " + string.Join(" · ", cbits),
+                    new Vector2(0, -86), 16, new Color(1f, 0.82f, 0.3f));
+            }
+            UI.UIKit.MakeButton(card.transform, "ВЕРНУТЬСЯ В ГРИД", new Vector2(0, -142), new Vector2(380, 56),
                 () => { Debug.Log("[UI] results->grid click"); App.SceneFlow.GoGrid(); }, GameData.INFECTED);
-            MakeUiText(card.transform, "клик · Enter · Пробел", new Vector2(0, -160), 14, new Color(0.45f, 0.55f, 0.65f));
+            MakeUiText(card.transform, "клик · Enter · Пробел", new Vector2(0, -190), 14, new Color(0.45f, 0.55f, 0.65f));
         }
 
         static void MakeUiText(Transform parent, string s, Vector2 pos, int size, Color c)

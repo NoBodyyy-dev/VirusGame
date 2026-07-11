@@ -268,6 +268,43 @@ static class SelfTest
             "обучение АВ переживает сейв");
         s.avSeen["jam"] = 0; s.avSeen["morph"] = 0;
 
+        // ── контракты стаи: доска из 3, детерминизм, награды, сейв ──
+        {
+            var cs = new GameState(); cs.NewCampaign();
+            Check(cs.contracts.Count == 3, "доска: 3 контракта");
+            Check(cs.contracts[0] != cs.contracts[1] && cs.contracts[1] != cs.contracts[2]
+                && cs.contracts[0] != cs.contracts[2], "доска: контракты уникальны");
+            foreach (var cid in cs.contracts)
+                Check(GameData.CONTRACTS.ContainsKey(cid), $"доска: контракт {cid} известен");
+            var cs2 = new GameState(); cs2.NewCampaign();
+            cs2.ReseedCampaign(cs.campaignSeed);
+            Check(string.Join(",", cs2.contracts) == string.Join(",", cs.contracts),
+                "кооп: доска совпадает после ресида");
+            // КУРЬЕР: ◈120 за рейд → отметка и награда
+            cs.contracts.Clear(); cs.contracts.Add("courier");
+            cs.StartHack(cs.gridNodes[0]);
+            int samplesBefore = cs.resources["code_samples"];
+            cs.DepositValue(70f); cs.DepositValue(70f);
+            cs.FinishHack(true);
+            Check(cs.contractsDone.Contains("courier"), "контракт КУРЬЕР выполнен");
+            Check(cs.lastContractsDone.Contains("courier"), "контракт в сводке рейда");
+            Check(cs.resources["code_samples"] == samplesBefore + 1, "награда контракта выдана");
+            cs.StartHack(cs.gridNodes[1]); cs.DepositValue(150f); cs.FinishHack(true);
+            Check(cs.lastContractsDone.Count == 0, "контракт не выдаётся дважды");
+            var cs3 = new GameState();
+            cs3.Deserialize(cs.Serialize());
+            Check(cs3.contractsDone.Contains("courier"), "выполненные контракты в сейве");
+            // ЧИСТЫЕ РУКИ: урон срывает, чистая победа засчитывается
+            cs.contracts.Clear(); cs.contracts.Add("untouched"); cs.contractsDone.Clear();
+            cs.StartHack(cs.gridNodes[2]);
+            cs.lastHits = 1;
+            cs.FinishHack(true);
+            Check(!cs.contractsDone.Contains("untouched"), "ЧИСТЫЕ РУКИ: урон срывает");
+            cs.StartHack(cs.gridNodes[2]);
+            cs.FinishHack(true);
+            Check(cs.contractsDone.Contains("untouched"), "ЧИСТЫЕ РУКИ: чистая победа зачтена");
+        }
+
         // рекорды: данк/комбо/лучшая добыча копятся и сериализуются
         s.StartHack(s.gridNodes[1]);
         s.lastDunks = 2;

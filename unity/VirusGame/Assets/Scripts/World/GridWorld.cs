@@ -64,6 +64,7 @@ namespace Virus.World
             BuildOracle();
             BuildNodes();
             BuildMotes();
+            BuildContractBoard();
             Sfx.Ambient("wind", 0.14f);   // подложка Грида
             // атмосфера: мотыльки данных над обучающим ангаром и залом Оракула
             Fx.DataMotes(transform, new Vector3(0, 5f, 17f), new Vector3(44f, 7f, 42f),
@@ -74,6 +75,36 @@ namespace Virus.World
             BuildCarryInteract();
             _hud = FindFirstObjectByType<UI.Hud>();
             UpdateObjective();
+        }
+
+        // ── доска контрактов: 3 испытания кампании, награда за каждое ──
+        // Диегетический экран в обучающем ангаре: строится по состоянию сейва
+        // (сцена пересобирается после каждого рейда — статус всегда свежий).
+        void BuildContractBoard()
+        {
+            if (S.contracts.Count == 0) return;
+            var root = new GameObject("contracts").transform;
+            root.SetParent(transform, false);
+            root.localPosition = new Vector3(11f, 0, -3.5f);
+            Build.Solid(root, new Vector3(4.6f, 0.25f, 0.6f), Mats.MetalDark(0.5f), new Vector3(0, 0.12f, 0));
+            Build.Solid(root, new Vector3(0.28f, 2.2f, 0.28f), Mats.MetalDark(0.5f), new Vector3(-2f, 1.1f, 0));
+            Build.Solid(root, new Vector3(0.28f, 2.2f, 0.28f), Mats.MetalDark(0.5f), new Vector3(2f, 1.1f, 0));
+            Build.MeshBox(root, new Vector3(4.6f, 1.9f, 0.16f), Mats.Plastic(new Color(0.05f, 0.07f, 0.1f)), new Vector3(0, 2.1f, 0));
+            Build.MeshBox(root, new Vector3(4.7f, 2f, 0.08f), Mats.Neon(new Color(0.18f, 0.5f, 0.7f), 0.55f), new Vector3(0, 2.1f, -0.02f));
+            var sb = new System.Text.StringBuilder("КОНТРАКТЫ СТАИ\n");
+            foreach (var id in S.contracts)
+            {
+                if (!GameData.CONTRACTS.TryGetValue(id, out var c)) continue;
+                bool done = S.contractsDone.Contains(id);
+                sb.Append(done ? "[OK] " : "[ - ] ")
+                  .Append(c.name).Append(" · ").Append(c.desc)
+                  .Append(" · ").Append(GameData.RewardLabel(c.reward)).Append('\n');
+            }
+            var label = Build.Label(root, sb.ToString(), new Vector3(0, 2.1f, 0.14f), 1.05f,
+                new Color(0.85f, 0.93f, 1f), false);
+            // TextMesh читается с -Z: разворачиваем к игроку (подходит с юга)
+            label.transform.localRotation = Quaternion.Euler(0, 180f, 0);
+            Build.Omni(root, new Vector3(0, 2.6f, 1.2f), new Color(0.3f, 0.7f, 1f), 1f, 6f);
         }
 
         float _saveTimer = 20f;

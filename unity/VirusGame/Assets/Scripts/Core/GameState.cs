@@ -86,6 +86,54 @@ namespace Virus.Core
             ["freeze"] = "ГОРЯЧИЙ РЕЗЕРВ: шифрование морозит систему лишь 1.8с",
         };
 
+        // ── контракты стаи: 3 испытания на кампанию (доска в Гриде) ──
+        // Набор детерминирован сидом кампании — у стаи одна и та же доска.
+        public readonly List<string> contracts = new();
+        public readonly HashSet<string> contractsDone = new();
+        public readonly List<string> lastContractsDone = new();   // взятые в ПОСЛЕДНЕМ рейде
+
+        // пер-рейдовая статистика для условий контрактов
+        public int lastHits, lastTasksRaid;
+        public float lastMaxAlarm;
+
+        void PickContracts()
+        {
+            contracts.Clear();
+            var keys = new List<string>(GameData.CONTRACTS.Keys);
+            keys.Sort(System.StringComparer.Ordinal);
+            var rng = new System.Random(campaignSeed ^ 0x5EED);
+            for (int i = keys.Count - 1; i > 0; i--)
+            {
+                int j = rng.Next(i + 1);
+                (keys[i], keys[j]) = (keys[j], keys[i]);
+            }
+            for (int i = 0; i < 3 && i < keys.Count; i++) contracts.Add(keys[i]);
+        }
+
+        void CheckContracts(bool victory)
+        {
+            lastContractsDone.Clear();
+            foreach (var id in contracts)
+            {
+                if (contractsDone.Contains(id)) continue;
+                bool ok = id switch
+                {
+                    "untouched" => victory && lastHits == 0,
+                    "ghost" => victory && lastMaxAlarm < 55f,
+                    "showman" => lastDunks >= 3,
+                    "courier" => lastDelivered >= 120,
+                    "handyman" => lastTasksRaid >= 2,
+                    _ => false,
+                };
+                if (!ok) continue;
+                contractsDone.Add(id);
+                lastContractsDone.Add(id);
+                var rw = GameData.CONTRACTS[id].reward.Split(':');
+                if (rw.Length == 2 && int.TryParse(rw[1], out var amt))
+                    resources[rw[0]] = resources.GetValueOrDefault(rw[0], 0) + amt;
+            }
+        }
+
         public readonly Dictionary<string, int> resources = new()
             { {"data_fragments",0}, {"code_samples",0}, {"mutagen",0}, {"ghost_tokens",0} };
 
@@ -299,6 +347,7 @@ namespace Virus.Core
         public void CareerEvent(string key, int amount = 1)
         {
             career[key] = career.GetValueOrDefault(key, 0) + amount;
+            if (key == "tasks") lastTasksRaid += amount;   // контракт «МОНТАЖНИК»
             EvolutionChanged?.Invoke();
         }
 
@@ -315,7 +364,12 @@ namespace Virus.Core
             gridFlags.Clear(); blockPositions.Clear();
             gridHeat = 0f; campaignWon = false; oracleCoreDown = false;
             currentNode = null;
+            contractsDone.Clear();
+            lastContractsDone.Clear();
+            foreach (var k in new List<string>(avSeen.Keys)) avSeen[k] = 0;
+            avCounter = "";
             GenerateGrid();
+            PickContracts();
             EvolutionChanged?.Invoke();
         }
 
@@ -335,6 +389,7 @@ namespace Virus.Core
                 n.seed = rng.Next();
                 n.arch = GameData.ArchForNode(n.seed, n.zone, n.tier);
             }
+            PickContracts();   // доска контрактов тоже от сида — совпадает с хостом
         }
 
         void GenerateGrid()
@@ -462,6 +517,7 @@ namespace Virus.Core
             evacOpen = false; wipeForced = false; evacLeft = 0f;
             lastDelivered = 0; lastDeposits = 0;
             lastDunks = 0; lastBestCombo = 0;
+            lastHits = 0; lastTasksRaid = 0; lastMaxAlarm = alarm;
             lastRecordLoot = false; lastRecordCombo = false;
             _comboCount = 0; _comboUntil = 0f;
             var t = GameData.TIERS[n.tier];
@@ -565,6 +621,7 @@ namespace Virus.Core
                 gridHeat = Mathf.Min(gridHeat + 25f, 100f);
                 resources["data_fragments"] += (int)(lastDelivered * 0.4f);
             }
+            CheckContracts(victory);   // испытания доски: награда сверху
             EvolutionChanged?.Invoke();
         }
 
@@ -599,6 +656,7 @@ namespace Virus.Core
             var flags = new List<string>();
             foreach (var kv in gridFlags) if (kv.Value) flags.Add(kv.Key);
             sb.Append($"flags={string.Join(",", flags)}\n");
+            sb.Append($"cdone={string.Join(",", contractsDone)}\n");
             foreach (var kv in blockPositions)
                 sb.Append($"block.{kv.Key}={F(kv.Value.x)};{F(kv.Value.y)};{F(kv.Value.z)}\n");
             return sb.ToString();
@@ -645,6 +703,9 @@ namespace Virus.Core
                         break;
                     case "flags":
                         foreach (var fl in val.Split(',')) if (fl.Length > 0) gridFlags[fl] = true;
+                        break;
+                    case "cdone":
+                        foreach (var cd in val.Split(',')) if (cd.Length > 0) contractsDone.Add(cd);
                         break;
                     default:
                         if (key.StartsWith("res.") && int.TryParse(val, out var rv))
