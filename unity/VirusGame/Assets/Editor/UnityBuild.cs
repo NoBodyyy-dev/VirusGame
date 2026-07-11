@@ -213,6 +213,50 @@ namespace Virus.EditorTools
             }
         }
 
+        // Витрина: имя игры (заголовок окна, папка сейвов) и иконка — вирус-сфера.
+        // Имя без двоеточия: из него строится путь в LocalLow.
+        static void SetupBranding()
+        {
+            PlayerSettings.productName = "VIRUS Panic Protocol";
+            PlayerSettings.companyName = "PanicWorks";
+
+            var icon = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/icon.png");
+            if (icon == null)
+            {
+                const int N = 256;
+                var tex = new Texture2D(N, N, TextureFormat.RGBA32, false);
+                var px = new Color[N * N];
+                var teal = new Color(0.13f, 0.83f, 1f);
+                var core = new Color(0.75f, 0.97f, 1f);
+                var bg = new Color(0.03f, 0.06f, 0.1f);
+                Vector2 c = new(N / 2f, N / 2f);
+                for (int y = 0; y < N; y++)
+                    for (int x = 0; x < N; x++)
+                    {
+                        var p = new Vector2(x + 0.5f, y + 0.5f);
+                        float d = Vector2.Distance(p, c);
+                        // тёмная плашка со скруглением по альфе
+                        float corner = Mathf.Max(Mathf.Abs(p.x - c.x), Mathf.Abs(p.y - c.y));
+                        Color col = corner < 122f ? bg : new Color(0, 0, 0, 0);
+                        // шипы-рецепторы: 8 лучей
+                        float ang = Mathf.Atan2(p.y - c.y, p.x - c.x);
+                        float spike = Mathf.Abs(Mathf.Sin(ang * 4f));
+                        if (d < 96f && d > 60f && spike > 0.9f) col = teal;
+                        // тело и ядро вириона
+                        if (d < 62f) col = Color.Lerp(teal, bg, d / 62f * 0.55f);
+                        if (d < 26f) col = core;
+                        px[y * N + x] = col;
+                    }
+                tex.SetPixels(px);
+                tex.Apply();
+                File.WriteAllBytes("Assets/icon.png", tex.EncodeToPNG());
+                AssetDatabase.ImportAsset("Assets/icon.png");
+                icon = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/icon.png");
+            }
+            if (icon != null)
+                PlayerSettings.SetIconsForTargetGroup(BuildTargetGroup.Unknown, new[] { icon });
+        }
+
         [MenuItem("Virus/Build Windows")]
         public static void BuildWindows()
         {
@@ -220,6 +264,7 @@ namespace Virus.EditorTools
             // Unity 6: сплеш «Made with Unity» отключаем (разрешено и на Personal)
             PlayerSettings.SplashScreen.show = false;
             PlayerSettings.SplashScreen.showUnityLogo = false;
+            SetupBranding();
             EnsureSteamDefine();
             SetupURP();
             // Форсим только Standard (обычный шейдер, иначе вырезается).

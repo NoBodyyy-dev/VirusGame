@@ -183,6 +183,18 @@ static class SelfTest
         Check(Math.Abs(restored.blockPositions[2].z - (-3.25f)) < 0.01f, "позиции блоков восстановлены");
         Check(!restored.Deserialize("мусор"), "битый сейв отвергнут");
 
+        // рекорды: данк/комбо/лучшая добыча копятся и сериализуются
+        s.StartHack(s.gridNodes[1]);
+        s.lastDunks = 2;
+        s.DepositValue(30f);
+        s.DepositValue(30f);
+        s.FinishHack(true);
+        Check(s.records["dunks"] >= 2 && s.records["bestCombo"] >= 2 && s.records["bestLoot"] >= 60, "рекорды обновлены");
+        Check(s.lastRecordLoot, "флаг нового рекорда добычи");
+        var restored2 = new GameState();
+        restored2.Deserialize(s.Serialize());
+        Check(restored2.records["bestCombo"] == s.records["bestCombo"], "рекорды в сейве");
+
         Console.WriteLine(_fails == 0
             ? "SELFTEST OK — все проверки ядра прошли"
             : $"SELFTEST: {_fails} провалов");

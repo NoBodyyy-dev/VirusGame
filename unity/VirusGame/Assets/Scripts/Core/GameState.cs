@@ -86,7 +86,12 @@ namespace Virus.Core
         public const float EVAC_TIME = 75f, WIPE_EVAC_TIME = 45f;
 
         // итоги последнего рейда (для результатов и статистики)
-        public int lastDelivered, lastDeposits;
+        public int lastDelivered, lastDeposits, lastDunks, lastBestCombo;
+        public bool lastRecordLoot, lastRecordCombo;
+
+        // персистентные рекорды кампании (в сейве)
+        public readonly Dictionary<string, int> records = new()
+            { {"bestLoot",0}, {"bestCombo",0}, {"dunks",0} };
 
         // ── идентичность штамма ──
         // скин ветки появляется только с УР.1; «сброс до нуля» временно оголяет
@@ -266,6 +271,7 @@ namespace Virus.Core
             stolenAbilities.Clear();
             resetUntil = 0f;
             foreach (var k in new List<string>(career.Keys)) career[k] = 0;
+            foreach (var k in new List<string>(records.Keys)) records[k] = 0;
             foreach (var k in new List<string>(resources.Keys)) resources[k] = 0;
             gridFlags.Clear(); blockPositions.Clear();
             gridHeat = 0f; campaignWon = false; oracleCoreDown = false;
@@ -410,6 +416,8 @@ namespace Virus.Core
             myHp = myMaxHp; myBug = false;
             evacOpen = false; wipeForced = false; evacLeft = 0f;
             lastDelivered = 0; lastDeposits = 0;
+            lastDunks = 0; lastBestCombo = 0;
+            lastRecordLoot = false; lastRecordCombo = false;
             _comboCount = 0; _comboUntil = 0f;
             var t = GameData.TIERS[n.tier];
             // вспомогательный взлом: уже взломанные серверы этой зоны помогают —
@@ -444,6 +452,7 @@ namespace Virus.Core
         {
             _comboCount = now < _comboUntil ? _comboCount + 1 : 1;
             _comboUntil = now + 20f;
+            if (_comboCount > lastBestCombo) lastBestCombo = _comboCount;
             float boosted = v * ComboMult;
             access = Mathf.Min(access + boosted / Mathf.Max(raid?.quota ?? 100, 1) * 100f, 999f);
             lastDelivered += (int)boosted;
@@ -463,6 +472,12 @@ namespace Virus.Core
             stolenAbilities.Clear();
             resetUntil = 0f;
             career["raids"]++;   // карьерные счётчики — топливо заданий на активки
+            // рекорды кампании: чем хвастаться на экране результатов
+            records["dunks"] += lastDunks;
+            lastRecordLoot = lastDelivered > records["bestLoot"];
+            if (lastRecordLoot) records["bestLoot"] = lastDelivered;
+            lastRecordCombo = lastBestCombo > records["bestCombo"];
+            if (lastRecordCombo) records["bestCombo"] = lastBestCombo;
             if (victory)
             {
                 currentNode.infected = true;
@@ -498,6 +513,7 @@ namespace Virus.Core
             sb.Append($"oracle={(oracleCoreDown ? 1 : 0)}\n");
             foreach (var kv in resources) sb.Append($"res.{kv.Key}={kv.Value}\n");
             foreach (var kv in career) sb.Append($"car.{kv.Key}={kv.Value}\n");
+            foreach (var kv in records) sb.Append($"rec.{kv.Key}={kv.Value}\n");
             var inf = new List<string>();
             foreach (var n in gridNodes) if (n.infected) inf.Add(n.id.ToString());
             sb.Append($"infected={string.Join(",", inf)}\n");
@@ -544,6 +560,8 @@ namespace Virus.Core
                             resources[key.Substring(4)] = rv;
                         else if (key.StartsWith("car.") && int.TryParse(val, out var cv))
                             career[key.Substring(4)] = cv;
+                        else if (key.StartsWith("rec.") && int.TryParse(val, out var rcv))
+                            records[key.Substring(4)] = rcv;
                         else if (key.StartsWith("block.") && int.TryParse(key.Substring(6), out var bid))
                         {
                             var p = val.Split(';');

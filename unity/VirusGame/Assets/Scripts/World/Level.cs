@@ -1987,6 +1987,7 @@ namespace Virus.World
                 if (Vector3.Distance(l.body.position, PadPos) > PadRadius + 0.4f) continue;
                 bool dunk = l.rb != null && !l.rb.isKinematic && l.rb.linearVelocity.magnitude > 4f;
                 l.deposited = true;
+                if (dunk) S.lastDunks++;
                 float got = S.DepositValue(l.value * (dunk ? 1.15f : 1f));
                 Destroy(l.body.gameObject);
                 if (_coop)
@@ -2115,10 +2116,22 @@ namespace Virus.World
                 new Color(accent.r, accent.g, accent.b, 0.9f));
             MakeUiText(card.transform, victory ? "СЕРВЕР ВЗЛОМАН" : "РЕЙД ПРОВАЛЕН", new Vector2(0, 120), 42, accent);
             MakeUiText(card.transform, reason, new Vector2(0, 62), 21, new Color(0.88f, 0.95f, 1f));
-            MakeUiText(card.transform, $"Вынесено ◈{S.lastDelivered} за {S.lastDeposits} ходок", new Vector2(0, 22), 19, new Color(0.6f, 0.75f, 0.85f));
+            string dunks = S.lastDunks > 0 ? $" · данков: {S.lastDunks}" : "";
+            string combo = S.lastBestCombo > 1 ? $" · комбо ×{S.lastBestCombo}" : "";
+            MakeUiText(card.transform, $"Вынесено ◈{S.lastDelivered} за {S.lastDeposits} ходок{dunks}{combo}",
+                new Vector2(0, 22), 19, new Color(0.6f, 0.75f, 0.85f));
+            // новые рекорды кампании — золотая строка
+            if (S.lastRecordLoot || S.lastRecordCombo)
+            {
+                string rec = "НОВЫЙ РЕКОРД: " +
+                    (S.lastRecordLoot ? $"добыча ◈{S.records["bestLoot"]}" : "") +
+                    (S.lastRecordLoot && S.lastRecordCombo ? " и " : "") +
+                    (S.lastRecordCombo ? $"комбо ×{S.records["bestCombo"]}" : "") + "!";
+                MakeUiText(card.transform, rec, new Vector2(0, -8), 18, new Color(1f, 0.82f, 0.3f));
+            }
             MakeUiText(card.transform,
                 $"Карьера: {S.career["deposits"]} вносов · {S.career["tasks"]} задач · {S.career["raids"]} рейдов · ◈{S.career["delivered"]} всего",
-                new Vector2(0, -14), 16, new Color(0.55f, 0.65f, 0.75f));
+                new Vector2(0, -38), 16, new Color(0.55f, 0.65f, 0.75f));
             UI.UIKit.MakeButton(card.transform, "ВЕРНУТЬСЯ В ГРИД", new Vector2(0, -110), new Vector2(380, 56),
                 () => App.SceneFlow.GoGrid(), GameData.INFECTED);
         }
