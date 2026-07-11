@@ -484,7 +484,20 @@ namespace UnityEngine
         public Vector4 uv0;
         public static UIVertex simpleVert => new();
     }
-    public struct Vector4 { public float x, y, z, w; }
+    public struct Vector4
+    {
+        public float x, y, z, w;
+        public Vector4(float x, float y, float z, float w) { this.x = x; this.y = y; this.z = z; this.w = w; }
+    }
+
+    public enum SpriteMeshType { FullRect, Tight }
+    public class Sprite : Object
+    {
+        public static Sprite Create(Texture2D tex, Rect rect, Vector2 pivot, float ppu = 100f,
+            uint extrude = 0, SpriteMeshType mesh = SpriteMeshType.Tight, Vector4 border = default) => new();
+    }
+
+    public enum FontStyle { Normal, Bold, Italic, BoldAndItalic }
 
     public static class RectTransformUtility
     {
@@ -545,17 +558,32 @@ namespace UnityEngine.UI
         public Font font;
         public string text;
         public int fontSize;
+        public FontStyle fontStyle;
         public TextAnchor alignment;
         public HorizontalWrapMode horizontalOverflow;
         public VerticalWrapMode verticalOverflow;
         public bool supportRichText = true;
     }
 
-    public class Image : MaskableGraphic { }
+    public class Image : MaskableGraphic
+    {
+        public enum Type { Simple, Sliced, Tiled, Filled }
+        public Sprite sprite;
+        public Type type;
+        public float fillAmount;
+    }
+
+    public struct ColorBlock
+    {
+        public Color normalColor, highlightedColor, pressedColor, selectedColor, disabledColor;
+        public float colorMultiplier, fadeDuration;
+    }
 
     public class Button : MonoBehaviour
     {
         public Events.UnityEvent onClick = new();
+        public Graphic targetGraphic;
+        public ColorBlock colors;
     }
 }
 

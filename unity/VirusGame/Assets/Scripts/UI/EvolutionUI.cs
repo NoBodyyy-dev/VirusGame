@@ -104,6 +104,8 @@ namespace Virus.UI
             var tipGo = new GameObject("tip", typeof(RectTransform));
             tipGo.transform.SetParent(_root.transform, false);
             _tipPanel = tipGo.AddComponent<Image>();
+            _tipPanel.sprite = UIKit.Rounded;
+            _tipPanel.type = Image.Type.Sliced;
             _tipPanel.color = new Color(0.06f, 0.03f, 0.1f, 0.94f);
             _tipPanel.raycastTarget = false;
             _tipTitle = MakeText("", 19, TextAnchor.UpperLeft, tipGo.transform);

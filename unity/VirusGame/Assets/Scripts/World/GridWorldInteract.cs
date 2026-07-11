@@ -339,8 +339,10 @@ namespace Virus.World
         {
             foreach (var e in new[] { a, b })
             {
-                Build.MeshBox(transform, new Vector3(0.2f, 1f, 0.2f), Mats.MetalDark(0.5f), e - new Vector3(0, 0.5f, 0));
-                Build.MeshBox(transform, Vector3.one * 0.18f, Mats.Neon(new Color(0.2f, 0.8f, 0.95f), 1.6f), e);
+                Build.Prim(PrimitiveType.Cylinder, transform, new Vector3(0.18f, 0.5f, 0.18f),
+                    Mats.MetalDark(0.5f), e - new Vector3(0, 0.5f, 0));
+                Build.Prim(PrimitiveType.Sphere, transform, Vector3.one * 0.22f,
+                    Mats.Neon(new Color(0.2f, 0.8f, 0.95f), 1.6f), e);
             }
             var zs = new ZipState { a = a, b = b, flag = flagKey };
             _zips.Add(zs);

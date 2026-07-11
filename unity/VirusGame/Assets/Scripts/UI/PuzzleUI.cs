@@ -57,7 +57,10 @@ namespace Virus.UI
             dim.AddComponent<Image>().color = new Color(0, 0.006f, 0.014f, 0.82f);
 
             var panel = NewRect(canvasGo.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(460, 620));
-            panel.AddComponent<Image>().color = new Color(0.008f, 0.022f, 0.04f, 0.97f);
+            var panelImg = panel.AddComponent<Image>();
+            panelImg.sprite = UIKit.Rounded;
+            panelImg.type = Image.Type.Sliced;
+            panelImg.color = UIKit.PanelBg2;
 
             MakeText(panel.transform, title, new Vector2(0, 270), 26, new Color(0.21f, 0.85f, 1f));
             _status = MakeText(panel.transform, "СЛЕДИ ЗА СИГНАЛОМ…", new Vector2(0, 230), 18, new Color(1f, 0.7f, 0.35f));
@@ -69,6 +72,8 @@ namespace Virus.UI
                 var rt = cellGo.GetComponent<RectTransform>();
                 rt.anchoredPosition = new Vector2((i % N - 1.5f) * 98f, 110f - (i / N) * 98f);
                 var img = cellGo.AddComponent<Image>();
+                img.sprite = UIKit.Rounded;
+                img.type = Image.Type.Sliced;
                 img.color = CellIdle;
                 var btn = cellGo.AddComponent<Button>();
                 btn.onClick.AddListener(() => OnCell(idx));
@@ -76,12 +81,8 @@ namespace Virus.UI
                 _cellImgs.Add(img);
             }
 
-            var cancelGo = NewRect(panel.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), new Vector2(340, 46));
-            cancelGo.GetComponent<RectTransform>().anchoredPosition = new Vector2(0, -270);
-            cancelGo.AddComponent<Image>().color = new Color(0.2f, 0.05f, 0.08f, 0.9f);
-            var cbtn = cancelGo.AddComponent<Button>();
-            cbtn.onClick.AddListener(() => Close(false));
-            MakeText(cancelGo.transform, "ОТОЙТИ ОТ ТЕРМИНАЛА", Vector2.zero, 18, new Color(1f, 0.4f, 0.5f));
+            UIKit.MakeButton(panel.transform, "ОТОЙТИ ОТ ТЕРМИНАЛА", new Vector2(0, -270), new Vector2(340, 46),
+                () => Close(false), new Color(1f, 0.4f, 0.5f));
 
             NewSequence();
         }

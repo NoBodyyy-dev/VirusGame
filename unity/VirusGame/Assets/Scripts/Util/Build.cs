@@ -49,6 +49,20 @@ namespace Virus.Util
             Collide(parent, size, pos);
         }
 
+        // Примитив (сфера/цилиндр/капсула…) — против «всё квадратное».
+        // collide=true оставляет родной коллайдер примитива (Sphere/Capsule/Mesh).
+        public static GameObject Prim(PrimitiveType t, Transform parent, Vector3 scale, Material mat,
+                                      Vector3 pos, bool collide = false)
+        {
+            var go = GameObject.CreatePrimitive(t);
+            if (!collide) Object.Destroy(go.GetComponent<Collider>());
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = pos;
+            go.transform.localScale = scale;
+            go.GetComponent<MeshRenderer>().sharedMaterial = mat;
+            return go;
+        }
+
         // Шрифт ОС в рантайме — не требует импортированных TMP-ассетов, работает
         // и в сборке. Шейдер "GUI/Text Shader" включаем в билд (см. UnityBuild).
         static Font _font;

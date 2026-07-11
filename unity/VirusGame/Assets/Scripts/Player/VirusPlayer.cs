@@ -22,6 +22,9 @@ namespace Virus.Player
         public bool carrying = false;
         public float baseSpeed = 6f, sprintSpeed = 9.2f;
 
+        // множители мутаторов рейда (НЕВЕСОМОСТЬ, СКОЛЬЗКИЙ ПОЛ…)
+        public float gravityScale = 1f, accelScale = 1f;
+
         // статусы (метки времени Time.time): ловушки и активки
         public float hasteUntil, slowUntil, lockedUntil;
         public bool bug;
@@ -181,13 +184,13 @@ namespace Virus.Player
             float speed = bug ? 3.4f : ((sprinting ? sprintSpeed : baseSpeed) + evo) * carryFactor;
             if (Time.time < hasteUntil) speed *= 1.45f;
             if (Time.time < slowUntil) speed *= 0.55f;
-            float accel = grounded ? AccelGround : AccelAir;
+            float accel = (grounded ? AccelGround : AccelAir) * accelScale;
             _vel.x = Mathf.MoveTowards(_vel.x, input.x * speed, accel * Time.deltaTime);
             _vel.z = Mathf.MoveTowards(_vel.z, input.z * speed, accel * Time.deltaTime);
 
             if (grounded && _vel.y < 0f) _vel.y = -2f;
             if (_jumpBufT > 0f && _coyoteT > 0f) { _vel.y = JumpV; _jumpBufT = 0f; _coyoteT = 0f; }
-            _vel.y -= Gravity * Time.deltaTime;
+            _vel.y -= Gravity * gravityScale * Time.deltaTime;
 
             _cc.Move(_vel * Time.deltaTime);
 

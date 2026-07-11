@@ -141,6 +141,8 @@ namespace Virus.App
                 new GameObject("EventSystem", typeof(UnityEngine.EventSystems.EventSystem),
                     typeof(UnityEngine.EventSystems.StandaloneInputModule));
 
+            UI.UIKit.Panel(canvasGo.transform, new Vector2(0.5f, 0.5f), new Vector2(0, 170),
+                new Vector2(1180, 240), UI.UIKit.PanelBg);
             T(canvasGo.transform, "VIRUS // PANIC PROTOCOL", new Vector2(0, 220), 56, new Color(0.21f, 0.85f, 1f));
             T(canvasGo.transform,
                 "Ты — полиморфный вирус, проснувшийся в тренировочном Гриде.\n" +
@@ -203,17 +205,7 @@ namespace Virus.App
             t.rectTransform.sizeDelta = new Vector2(1400, 140);
         }
 
-        static void Btn(Transform parent, string label, Vector2 pos, UnityEngine.Events.UnityAction action)
-        {
-            var go = new GameObject("btn", typeof(RectTransform));
-            go.transform.SetParent(parent, false);
-            var rt = go.GetComponent<RectTransform>();
-            rt.sizeDelta = new Vector2(380, 54);
-            rt.anchoredPosition = pos;
-            go.AddComponent<Image>().color = new Color(0.03f, 0.1f, 0.16f, 0.95f);
-            var btn = go.AddComponent<Button>();
-            btn.onClick.AddListener(action);
-            T(go.transform, label, Vector2.zero, 24, new Color(0.21f, 0.85f, 1f));
-        }
+        static void Btn(Transform parent, string label, Vector2 pos, UnityEngine.Events.UnityAction action) =>
+            UI.UIKit.MakeButton(parent, label, pos, new Vector2(420, 54), action);
     }
 }
