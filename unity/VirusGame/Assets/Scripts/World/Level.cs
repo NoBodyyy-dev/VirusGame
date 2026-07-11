@@ -72,6 +72,8 @@ namespace Virus.World
         Vector3 _decoyPos;
         Guard _hookedBy;
 
+        AudioSource _ambience;
+
         // ── мутатор рейда: случайный твист каждого захода ──
         string _mutator = "";
         string _mutatorDesc = "";
@@ -234,6 +236,8 @@ namespace Virus.World
                 _accent, 45f);
             Fx.PortalSwirl(transform, PadPos + Vector3.up * 0.2f, GameData.INFECTED);
             Fx.ReflectionProbe(transform, new Vector3(0, 3.4f, 0), new Vector3(_hallW, 8f, _hallD));
+
+            _ambience = Sfx.Ambient("hum", 0.22f);   // гул серверной, густеет с тревогой
 
             BuildFlashOverlay();
             BuildPadArrow();
@@ -1206,6 +1210,7 @@ namespace Virus.World
                 Sfx.Play("alarm", 0.35f);
             }
             _phaseSeen = ph;
+            if (_ambience != null) _ambience.volume = 0.22f + ph * 0.07f;   // тревога густит гул
             RenderSettings.fogColor = ph switch
             {
                 3 => new Color(0.25f, 0.03f, 0.05f),
@@ -2083,6 +2088,7 @@ namespace Virus.World
             _done = true;
             Sfx.Play(victory ? "win" : "fail", 0.5f);
             S.FinishHack(victory);
+            App.SaveSystem.Save();   // прогресс кампании переживает закрытие игры
             _player.controlEnabled = false;
             Cursor.lockState = CursorLockMode.None;
             Cursor.visible = true;

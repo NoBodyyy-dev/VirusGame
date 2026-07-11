@@ -220,7 +220,12 @@ namespace UnityEngine
     public class AudioSource : Behaviour
     {
         public float volume = 1f;
+        public AudioClip clip;
+        public bool loop;
+        public float pitch = 1f;
         public void PlayOneShot(AudioClip clip, float vol) { }
+        public void Play() { }
+        public void Stop() { }
     }
 
     public enum LightType { Spot, Directional, Point, Area }
@@ -472,6 +477,7 @@ namespace UnityEngine
     {
         public static bool runInBackground;
         public static string dataPath = ".";
+        public static string persistentDataPath => ".";
         public static void Quit() { }
     }
 

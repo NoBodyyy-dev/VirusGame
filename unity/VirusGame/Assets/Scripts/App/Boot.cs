@@ -113,6 +113,8 @@ namespace Virus.App
                 SceneFlow.GoGrid();
                 return;
             }
+            if (System.Array.IndexOf(args, "-continue") >= 0)
+            { SaveSystem.Load(); SceneFlow.GoGrid(); return; }
             if (System.Array.IndexOf(args, "-autogrid") >= 0)
             { GameState.I.NewCampaign(); SceneFlow.GoGrid(); return; }
             if (System.Array.IndexOf(args, "-autoraid") >= 0)
@@ -153,6 +155,7 @@ namespace Virus.App
 
             Btn(canvasGo.transform, "НОВАЯ КАМПАНИЯ", new Vector2(0, -30), () =>
             {
+                SaveSystem.Delete();   // старый сейв стирается осознанно
                 GameState.I.NewCampaign();
                 SceneFlow.GoGrid();
             });
@@ -187,8 +190,14 @@ namespace Virus.App
             else
                 T(canvasGo.transform, "Steam не запущен — кооп через Steam недоступен",
                     new Vector2(210, -128), 15, new Color(0.4f, 0.5f, 0.6f));
-            if (GameState.I.gridNodes.Count > 0 && GameState.I.InfectedTotal() > 0 && !GameState.I.campaignWon)
-                Btn(canvasGo.transform, "ПРОДОЛЖИТЬ", new Vector2(0, -225), SceneFlow.GoGrid);
+            // продолжить: живая сессия в памяти или сейв с диска
+            bool memProgress = GameState.I.gridNodes.Count > 0 && GameState.I.InfectedTotal() > 0 && !GameState.I.campaignWon;
+            if (memProgress || SaveSystem.HasSave)
+                Btn(canvasGo.transform, "ПРОДОЛЖИТЬ КАМПАНИЮ", new Vector2(0, -225), () =>
+                {
+                    if (!memProgress) SaveSystem.Load();
+                    SceneFlow.GoGrid();
+                });
             Btn(canvasGo.transform, "ВЫХОД", new Vector2(0, -290), Application.Quit);
         }
 

@@ -32,6 +32,50 @@ namespace Virus.Util
             if (clip != null) Src.PlayOneShot(clip, Mathf.Clamp01(vol));
         }
 
+        // ── эмбиент: зацикленный гул без швов (целое число периодов в клипе).
+        // Источник живёт в сцене и умирает с ней — каждая сцена задаёт свой.
+        public static AudioSource Ambient(string kind, float vol)
+        {
+            var clip = AmbientClip(kind);
+            if (clip == null) return null;
+            var go = new GameObject("Ambience_" + kind);
+            var src = go.AddComponent<AudioSource>();
+            src.clip = clip;
+            src.loop = true;
+            src.volume = Mathf.Clamp01(vol);
+            src.Play();
+            return src;
+        }
+
+        static AudioClip AmbientClip(string kind)
+        {
+            string key = "amb_" + kind;
+            if (_cache.TryGetValue(key, out var c)) return c;
+            const float dur = 8f;
+            int n = (int)(Rate * dur);
+            var d = new float[n];
+            // частоты кратны 1/8 Гц — на границе клипа фаза совпадает, шва нет
+            (float f, float a)[] tones = kind switch
+            {
+                // серверная: низкий гул + лёгкая «электрика»
+                "hum" => new[] { (55f, 0.5f), (110f, 0.22f), (220f, 0.06f) },
+                // грид: ветер-подложка пониже и мягче
+                _ => new[] { (40f, 0.5f), (80f, 0.18f), (161f, 0.05f) },
+            };
+            for (int i = 0; i < n; i++)
+            {
+                float t = (float)i / Rate, v = 0f;
+                foreach (var (f, a) in tones) v += Mathf.Sin(2f * Mathf.PI * f * t) * a;
+                // медленное «дыхание» (0.25 Гц — 2 полных цикла на клип)
+                v *= 0.75f + 0.25f * Mathf.Sin(2f * Mathf.PI * 0.25f * t);
+                d[i] = v * 0.5f;
+            }
+            var clip = AudioClip.Create(key, n, 1, Rate, false);
+            clip.SetData(d, 0);
+            _cache[key] = clip;
+            return clip;
+        }
+
         static AudioClip Clip(string kind)
         {
             if (_cache.TryGetValue(kind, out var c)) return c;

@@ -482,6 +482,82 @@ namespace Virus.Core
             EvolutionChanged?.Invoke();
         }
 
+        // ── сохранение кампании: простой текстовый формат key=value ──
+        static string F(float v) => v.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+        public string Serialize()
+        {
+            var sb = new System.Text.StringBuilder();
+            sb.Append("v=1\n");
+            sb.Append($"branch={branch}\n");
+            sb.Append($"secondary={secondaryBranch}\n");
+            sb.Append($"level={virusLevel}\n");
+            sb.Append($"abilities={string.Join(",", activeAbilities)}\n");
+            sb.Append($"heat={(int)gridHeat}\n");
+            sb.Append($"won={(campaignWon ? 1 : 0)}\n");
+            sb.Append($"oracle={(oracleCoreDown ? 1 : 0)}\n");
+            foreach (var kv in resources) sb.Append($"res.{kv.Key}={kv.Value}\n");
+            foreach (var kv in career) sb.Append($"car.{kv.Key}={kv.Value}\n");
+            var inf = new List<string>();
+            foreach (var n in gridNodes) if (n.infected) inf.Add(n.id.ToString());
+            sb.Append($"infected={string.Join(",", inf)}\n");
+            var flags = new List<string>();
+            foreach (var kv in gridFlags) if (kv.Value) flags.Add(kv.Key);
+            sb.Append($"flags={string.Join(",", flags)}\n");
+            foreach (var kv in blockPositions)
+                sb.Append($"block.{kv.Key}={F(kv.Value.x)};{F(kv.Value.y)};{F(kv.Value.z)}\n");
+            return sb.ToString();
+        }
+
+        public bool Deserialize(string data)
+        {
+            if (string.IsNullOrEmpty(data) || !data.StartsWith("v=1")) return false;
+            NewCampaign();   // чистая база: узлы/словари, затем накатываем сейв
+            foreach (var raw in data.Split('\n'))
+            {
+                var line = raw.TrimEnd('\r');
+                int eq = line.IndexOf('=');
+                if (eq <= 0) continue;
+                string key = line.Substring(0, eq), val = line.Substring(eq + 1);
+                switch (key)
+                {
+                    case "branch": branch = val; break;
+                    case "secondary": secondaryBranch = val; break;
+                    case "level": int.TryParse(val, out virusLevel); break;
+                    case "abilities":
+                        activeAbilities.Clear();
+                        foreach (var a in val.Split(',')) if (a.Length > 0) activeAbilities.Add(a);
+                        break;
+                    case "heat": if (NetSync.ParseF(val, out var h)) gridHeat = h; break;
+                    case "won": campaignWon = val == "1"; break;
+                    case "oracle": oracleCoreDown = val == "1"; break;
+                    case "infected":
+                        foreach (var ids in val.Split(','))
+                            if (int.TryParse(ids, out var id) && id >= 0 && id < gridNodes.Count)
+                            { gridNodes[id].infected = true; gridNodes[id].failed = false; }
+                        break;
+                    case "flags":
+                        foreach (var fl in val.Split(',')) if (fl.Length > 0) gridFlags[fl] = true;
+                        break;
+                    default:
+                        if (key.StartsWith("res.") && int.TryParse(val, out var rv))
+                            resources[key.Substring(4)] = rv;
+                        else if (key.StartsWith("car.") && int.TryParse(val, out var cv))
+                            career[key.Substring(4)] = cv;
+                        else if (key.StartsWith("block.") && int.TryParse(key.Substring(6), out var bid))
+                        {
+                            var p = val.Split(';');
+                            if (p.Length == 3 && NetSync.ParseF(p[0], out var bx) &&
+                                NetSync.ParseF(p[1], out var by) && NetSync.ParseF(p[2], out var bz))
+                                blockPositions[bid] = new Vector3(bx, by, bz);
+                        }
+                        break;
+                }
+            }
+            EvolutionChanged?.Invoke();
+            return true;
+        }
+
         public void Tick(float dt)
         {
             now += dt;

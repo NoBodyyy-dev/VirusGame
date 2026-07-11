@@ -167,6 +167,22 @@ static class SelfTest
         var rhc = NetSync.Parse(NetSync.MsgHookCaught("raid:7", 1));
         Check(rhc[0] == "RHC" && rhc[2] == "1", "RHC: зацеп крюком");
 
+        // ── сохранение: сериализация → чистое состояние → загрузка ──
+        s.SetFlag("door:d_tut");
+        s.gridNodes[7].infected = true;
+        s.resources["data_fragments"] = 123;
+        s.blockPositions[2] = new UnityEngine.Vector3(1.5f, 0f, -3.25f);
+        string save = s.Serialize();
+        var restored = new GameState();
+        Check(restored.Deserialize(save), "сейв распознан");
+        Check(restored.branch == s.branch && restored.virusLevel == s.virusLevel, "ветка и уровень восстановлены");
+        Check(restored.activeAbilities.Count == s.activeAbilities.Count, "активки восстановлены");
+        Check(restored.Flag("door:d_tut") && restored.gridNodes[7].infected, "флаги и захваты восстановлены");
+        Check(restored.resources["data_fragments"] == 123, "ресурсы восстановлены");
+        Check(restored.career["deposits"] == s.career["deposits"], "карьера восстановлена");
+        Check(Math.Abs(restored.blockPositions[2].z - (-3.25f)) < 0.01f, "позиции блоков восстановлены");
+        Check(!restored.Deserialize("мусор"), "битый сейв отвергнут");
+
         Console.WriteLine(_fails == 0
             ? "SELFTEST OK — все проверки ядра прошли"
             : $"SELFTEST: {_fails} провалов");

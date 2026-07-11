@@ -64,6 +64,7 @@ namespace Virus.World
             BuildOracle();
             BuildNodes();
             BuildMotes();
+            Sfx.Ambient("wind", 0.14f);   // подложка Грида
             // атмосфера: мотыльки данных над обучающим ангаром и залом Оракула
             Fx.DataMotes(transform, new Vector3(0, 5f, 17f), new Vector3(44f, 7f, 42f),
                 GameData.TIER_COLORS[0], 26f);
@@ -75,8 +76,20 @@ namespace Virus.World
             UpdateObjective();
         }
 
+        float _saveTimer = 20f;
+
+        void OnDestroy() => App.SaveSystem.Save();
+
         void Update()
         {
+            // автосейв: интерактив Грида (двери/рычаги/блоки) не теряется
+            _saveTimer -= Time.deltaTime;
+            if (_saveTimer <= 0f)
+            {
+                _saveTimer = 20f;
+                App.SaveSystem.Save();
+            }
+
             // дерево эволюции: Tab открывает/закрывает (закрытие — внутри UI)
             if (Input.GetKeyDown(KeyCode.Tab) && !UI.PuzzleUI.IsOpen && !UI.EvolutionUI.IsOpen && !UI.PauseMenu.IsOpen)
                 UI.EvolutionUI.Toggle();
