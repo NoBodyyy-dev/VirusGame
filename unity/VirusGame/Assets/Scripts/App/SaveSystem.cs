@@ -36,5 +36,41 @@ namespace Virus.App
         {
             try { if (HasSave) File.Delete(PathFile); } catch { }
         }
+
+        // сводка сейва для карточки в меню — без применения к GameState
+        public class Preview
+        {
+            public bool ok;
+            public int infected, level, bestLoot;
+            public string branch = "";
+        }
+
+        public static Preview Peek()
+        {
+            var p = new Preview();
+            try
+            {
+                if (!HasSave) return p;
+                foreach (var raw in File.ReadAllText(PathFile).Split('\n'))
+                {
+                    var line = raw.TrimEnd('\r');
+                    int eq = line.IndexOf('=');
+                    if (eq <= 0) continue;
+                    string key = line.Substring(0, eq), val = line.Substring(eq + 1);
+                    switch (key)
+                    {
+                        case "branch": p.branch = val; break;
+                        case "level": int.TryParse(val, out p.level); break;
+                        case "rec.bestLoot": int.TryParse(val, out p.bestLoot); break;
+                        case "infected":
+                            foreach (var id in val.Split(',')) if (id.Length > 0) p.infected++;
+                            break;
+                    }
+                }
+                p.ok = true;
+            }
+            catch { }
+            return p;
+        }
     }
 }
