@@ -66,6 +66,8 @@ namespace Virus.World
             Build.MeshBox(transform, new Vector3(9.8f, 4.6f, 0.2f), Mats.Neon(GameData.ORACLE, 0.5f),
                 pos + new Vector3(0, 13.5f, 5.7f));
             _board = Build.Label(transform, "", pos + new Vector3(0, 13.5f, 6.05f), 4.2f, new Color(0.85f, 0.92f, 1f), false);
+            // TextMesh читаем с -Z: разворачиваем к игрокам (подходят с юга)
+            _board.transform.localRotation = Quaternion.Euler(0, 180f, 0);
         }
 
         void RefreshOracleShield()

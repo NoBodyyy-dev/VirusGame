@@ -247,6 +247,16 @@ namespace Virus.World
             // автотест полного цикла: победа → возврат в Грид (ловля глюков перехода)
             if (System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-autowin") >= 0)
                 StartCoroutine(AutoWin());
+            // автофиниш БЕЗ перехода: экран результатов остаётся — для теста кнопки
+            if (System.Array.IndexOf(System.Environment.GetCommandLineArgs(), "-autofinish") >= 0)
+                StartCoroutine(AutoFinish());
+        }
+
+        System.Collections.IEnumerator AutoFinish()
+        {
+            yield return new WaitForSeconds(6f);
+            S.access = 100f;
+            Finish(true, "автотест кнопки результатов");
         }
 
         System.Collections.IEnumerator AutoWin()
@@ -543,6 +553,8 @@ namespace Virus.World
             for (int s = -1; s <= 1; s += 2)
                 Build.MeshBox(transform, new Vector3(0.3f, 1.4f, 0.5f), trim, new Vector3(6 + s * 5.2f, 6.4f, -hz + 0.55f));
             _sysScreen = Build.Label(transform, "", new Vector3(6, 3.4f, -hz + 1.0f), 3.4f, new Color(0.75f, 0.95f, 1f), false);
+            // TextMesh читаем только с одной стороны — разворачиваем к залу
+            _sysScreen.transform.localRotation = Quaternion.Euler(0, 180f, 0);
         }
 
         // ── детальные пропы: стол на ножках + монитор на подставке + клавиатура ──
@@ -1132,6 +1144,13 @@ namespace Virus.World
 
         void Update()
         {
+            // с экрана результатов можно выйти и клавишей — не только мышью
+            if (_done && (Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.E)))
+            {
+                Debug.Log("[UI] results->grid key");
+                App.SceneFlow.GoGrid();
+                return;
+            }
             if (_done || _player == null) return;
             float dt = Time.deltaTime;
             _hitLock = Mathf.Max(_hitLock - dt, 0f);
@@ -2133,7 +2152,8 @@ namespace Virus.World
                 $"Карьера: {S.career["deposits"]} вносов · {S.career["tasks"]} задач · {S.career["raids"]} рейдов · ◈{S.career["delivered"]} всего",
                 new Vector2(0, -38), 16, new Color(0.55f, 0.65f, 0.75f));
             UI.UIKit.MakeButton(card.transform, "ВЕРНУТЬСЯ В ГРИД", new Vector2(0, -110), new Vector2(380, 56),
-                () => App.SceneFlow.GoGrid(), GameData.INFECTED);
+                () => { Debug.Log("[UI] results->grid click"); App.SceneFlow.GoGrid(); }, GameData.INFECTED);
+            MakeUiText(card.transform, "клик · Enter · Пробел", new Vector2(0, -160), 14, new Color(0.45f, 0.55f, 0.65f));
         }
 
         static void MakeUiText(Transform parent, string s, Vector2 pos, int size, Color c)

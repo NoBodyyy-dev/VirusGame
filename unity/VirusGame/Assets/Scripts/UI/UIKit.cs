@@ -190,6 +190,7 @@ namespace Virus.UI
             colors.highlightedColor = new Color(1.5f, 1.7f, 1.9f, 1f);
             colors.pressedColor = new Color(0.7f, 0.8f, 0.9f, 1f);
             btn.colors = colors;
+            btn.onClick.AddListener(() => Debug.Log($"[UI] button '{label}' pressed"));
             btn.onClick.AddListener(action);
             Label(go.transform, label, new Vector2(0.5f, 0.5f), Vector2.zero, (int)(size.y * 0.42f),
                 accent ?? Accent, TextAnchor.MiddleCenter, true);

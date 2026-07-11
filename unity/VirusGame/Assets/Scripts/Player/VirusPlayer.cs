@@ -135,10 +135,14 @@ namespace Virus.Player
         {
             EnsureModel();
 
-            // ESC — меню паузы (панели закрывают себя сами); клик — вернуть захват курсора
-            if (Input.GetKeyDown(KeyCode.Escape) && !UI.EvolutionUI.IsOpen && !UI.PuzzleUI.IsOpen && !UI.PauseMenu.IsOpen)
+            // ESC — меню паузы (панели закрывают себя сами); клик — вернуть захват
+            // курсора, но ТОЛЬКО пока управление активно: на экране результатов и
+            // в диалогах клик по кнопке не должен красть курсор (кнопка «умирала»)
+            if (Input.GetKeyDown(KeyCode.Escape) && controlEnabled
+                && !UI.EvolutionUI.IsOpen && !UI.PuzzleUI.IsOpen && !UI.PauseMenu.IsOpen)
                 UI.PauseMenu.Toggle();
-            else if (Input.GetMouseButtonDown(0) && Cursor.lockState != CursorLockMode.Locked
+            else if (Input.GetMouseButtonDown(0) && controlEnabled
+                     && Cursor.lockState != CursorLockMode.Locked
                      && !UI.EvolutionUI.IsOpen && !UI.PuzzleUI.IsOpen && !UI.PauseMenu.IsOpen)
             { Cursor.lockState = CursorLockMode.Locked; Cursor.visible = false; }
 
