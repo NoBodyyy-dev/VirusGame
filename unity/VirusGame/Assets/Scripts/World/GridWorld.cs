@@ -64,6 +64,11 @@ namespace Virus.World
             BuildOracle();
             BuildNodes();
             BuildMotes();
+            // атмосфера: мотыльки данных над обучающим ангаром и залом Оракула
+            Fx.DataMotes(transform, new Vector3(0, 5f, 17f), new Vector3(44f, 7f, 42f),
+                GameData.TIER_COLORS[0], 26f);
+            Fx.DataMotes(transform, new Vector3(124f, 9f, -338f), new Vector3(100f, 16f, 90f),
+                GameData.ORACLE, 40f);
             SpawnPlayer();
             BuildCarryInteract();
             _hud = FindFirstObjectByType<UI.Hud>();

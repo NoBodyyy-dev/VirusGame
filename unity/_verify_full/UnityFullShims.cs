@@ -263,6 +263,59 @@ namespace UnityEngine
         public void EnableKeyword(string k) { }
     }
 
+    // ── частицы (compile-only: модули как мутирующие структуры-обёртки) ──
+    public enum ParticleSystemSimulationSpace { Local, World }
+    public enum ParticleSystemShapeType { Sphere, Cone, Box }
+
+    public struct MinMaxCurve
+    {
+        public static implicit operator MinMaxCurve(float v) => new();
+    }
+
+    public struct MinMaxGradient
+    {
+        public static implicit operator MinMaxGradient(Color c) => new();
+    }
+
+    public class ParticleSystem : Component
+    {
+        public struct MainModule
+        {
+            public MinMaxGradient startColor { get; set; }
+            public MinMaxCurve startSize { get; set; }
+            public MinMaxCurve startSpeed { get; set; }
+            public MinMaxCurve startLifetime { get; set; }
+            public int maxParticles { get; set; }
+            public ParticleSystemSimulationSpace simulationSpace { get; set; }
+        }
+        public struct EmissionModule
+        {
+            public MinMaxCurve rateOverTime { get; set; }
+        }
+        public struct ShapeModule
+        {
+            public ParticleSystemShapeType shapeType { get; set; }
+            public Vector3 scale { get; set; }
+            public float angle { get; set; }
+            public float radius { get; set; }
+        }
+        public MainModule main => new();
+        public EmissionModule emission => new();
+        public ShapeModule shape => new();
+    }
+
+    public class ParticleSystemRenderer : Renderer { }
+
+    public class ReflectionProbe : Behaviour
+    {
+        public Rendering.ReflectionProbeMode mode;
+        public Rendering.ReflectionProbeRefreshMode refreshMode;
+        public Rendering.ReflectionProbeTimeSlicingMode timeSlicingMode;
+        public Vector3 size;
+        public int resolution;
+        public bool boxProjection;
+    }
+
     public class Mesh : Object { }
     public class MeshFilter : Component { public Mesh sharedMesh; }
     public class Renderer : Component { public Material sharedMaterial; public Material material; }
@@ -321,6 +374,10 @@ namespace UnityEngine
         public enum AmbientMode { Skybox, Trilight, Flat, Custom }
 
         public static class GraphicsSettings { public static object currentRenderPipeline => null; }
+
+        public enum ReflectionProbeMode { Baked, Realtime, Custom }
+        public enum ReflectionProbeRefreshMode { OnAwake, EveryFrame, ViaScripting }
+        public enum ReflectionProbeTimeSlicingMode { AllFacesAtOnce, IndividualFaces, NoTimeSlicing }
 
         public class VolumeComponent : ScriptableObject { }
 

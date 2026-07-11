@@ -149,6 +149,47 @@ namespace Virus.World
             },
         };
 
+        // ── мутатор: случайный твист рейда (обучение Т0 — без сюрпризов) ──
+        void RollMutator()
+        {
+            if (S.raid.tier == 0 || _rng.NextDouble() < 0.35) return;   // часть рейдов «чистые»
+            switch (_rng.Next(5))
+            {
+                case 0:
+                    _mutator = "gold";
+                    _mutatorDesc = "ЖИРНЫЙ КУШ — где-то лежит золотой файл ×3";
+                    _goldIndex = _rng.Next(S.raid.files);
+                    break;
+                case 1:
+                    _mutator = "lowgrav";
+                    _mutatorDesc = "НЕВЕСОМОСТЬ — прыжки выше, падения мягче";
+                    break;
+                case 2:
+                    _mutator = "slippery";
+                    _mutatorDesc = "СКОЛЬЗКИЙ ПОЛ — разгон и торможение как на льду";
+                    break;
+                case 3:
+                    _mutator = "double";
+                    _mutatorDesc = "ДВОЙНОЙ ЛУТ, ДВОЙНАЯ ТРЕВОГА";
+                    S.raid.files = (int)(S.raid.files * 1.6f);
+                    S.raid.creep *= 1.7f;
+                    break;
+                case 4:
+                    _mutator = "hooks";
+                    _mutatorDesc = "БЕШЕНЫЕ КРЮКИ — летят с любой тревоги, но роботы ленивые";
+                    _hookAlarmGate = 5f;
+                    _hookCdScale = 0.5f;
+                    _chaseSpeed = 4.4f;
+                    break;
+            }
+        }
+
+        void ApplyPlayerMutator()
+        {
+            if (_mutator == "lowgrav") _player.gravityScale = 0.5f;
+            if (_mutator == "slippery") _player.accelScale = 0.32f;
+        }
+
         void Start()
         {
             if (S.raid == null)   // прямой запуск сцены — тестовый рейд
@@ -162,8 +203,9 @@ namespace Virus.World
             _hallW = 70f + (float)_rng.NextDouble() * 18f;
             _hallD = 46f + (float)_rng.NextDouble() * 14f;
             _accent = GameData.TIER_COLORS[S.raid.tier];
-            _trapTimer = S.raid.trapInterval;
             _theme = Theme();
+            RollMutator();
+            _trapTimer = S.raid.trapInterval;
 
             BuildEnvironment();
             BuildArena();
@@ -172,6 +214,7 @@ namespace Virus.World
             SpawnGuards();
             SpawnFieldTasks();
             SpawnPlayer();
+            ApplyPlayerMutator();
 
             _hud = FindFirstObjectByType<UI.Hud>();
             if (_hud != null)
@@ -180,8 +223,18 @@ namespace Virus.World
                 _hud.Toast($"{S.raid.name} · {GameData.TIERS[S.raid.tier].name} · выносим лут и тихо!");
                 if (S.raid.assist > 0)
                     _hud.Toast($"ВСПОМОГАТЕЛЬНЫЙ ВЗЛОМ: {S.raid.assist} серверов зоны помогают (−{(int)(S.raid.assistK * 100)}% защиты)");
-                _hud.SetObjective("Тащи лут в круг у портала — набери 100% квоты");
+                if (_mutator != "")
+                    _hud.SetObjective($"МУТАТОР: {_mutatorDesc} · тащи лут в зону выноса");
+                else
+                    _hud.SetObjective("Тащи лут в круг у портала — набери 100% квоты");
             }
+            // атмосфера: мотыльки данных по залу, вихрь над зоной выноса,
+            // отражения неона на полу (probe вместо тяжёлого SSR)
+            Fx.DataMotes(transform, new Vector3(0, 3f, 0), new Vector3(_hallW - 6f, 5.5f, _hallD - 6f),
+                _accent, 45f);
+            Fx.PortalSwirl(transform, PadPos + Vector3.up * 0.2f, GameData.INFECTED);
+            Fx.ReflectionProbe(transform, new Vector3(0, 3.4f, 0), new Vector3(_hallW, 8f, _hallD));
+
             BuildFlashOverlay();
             BuildPadArrow();
             BuildMinimap();
@@ -725,8 +778,17 @@ namespace Virus.World
                 var rb = go.AddComponent<Rigidbody>();
                 rb.mass = crate ? 8 : 4;
                 var c = crate ? new Color(0.29f, 0.56f, 1f) : new Color(0.22f, 0.94f, 0.66f);
-                Build.MeshBox(go.transform, col.size, Mats.Neon(c, 0.9f), Vector3.zero);
                 float value = crate ? R(16, 24) : R(7, 11);
+                // мутатор ЖИРНЫЙ КУШ: один золотой файл ×3, светится издалека
+                bool golden = _mutator == "gold" && i == _goldIndex && !crate;
+                if (golden)
+                {
+                    value *= 3f;
+                    c = new Color(1f, 0.82f, 0.25f);
+                    go.transform.localScale = Vector3.one * 1.3f;
+                    Build.Omni(go.transform, Vector3.up * 0.6f, c, 1.8f, 7f);
+                }
+                Build.MeshBox(go.transform, col.size, Mats.Neon(c, golden ? 2.2f : 0.9f), Vector3.zero);
                 var loot = new Loot { body = go.transform, rb = rb, value = value, weight = crate ? 2 : 1 };
                 _loot.Add(loot);
 
@@ -1073,6 +1135,7 @@ namespace Virus.World
             TickAbilities();
             TickThrow();
             TickCarryAndDeposit();
+            TickPadIntake();
             TickBugAndRevive(dt);
             TickEvac(dt);
             TickSystemScreen();
@@ -1310,7 +1373,7 @@ namespace Virus.World
                     var dir = tp - g.t.position; dir.y = 0;
                     if (dir.magnitude > 1.6f)
                     {
-                        g.t.position += dir.normalized * (6f * dt);
+                        g.t.position += dir.normalized * (_chaseSpeed * dt);
                         g.t.rotation = Quaternion.Slerp(g.t.rotation, Quaternion.LookRotation(dir), 8f * dt);
                     }
                     // melee по себе; урон напарникам засчитывают их клиенты
@@ -1332,9 +1395,9 @@ namespace Virus.World
 
                 // крюк: с 50% тревоги по цели в радиусе обзора (на 100% — дальнобойный)
                 float sight = hunt ? HookRange : S.raid.camRange * 1.4f;
-                if (S.alarm >= 50f && seen && g.hookCd <= 0f && dist > 3f && dist < sight)
+                if (S.alarm >= _hookAlarmGate && seen && g.hookCd <= 0f && dist > 3f && dist < sight)
                 {
-                    g.hookCd = (float)_rng.NextDouble() * 4f + 5f;
+                    g.hookCd = ((float)_rng.NextDouble() * 4f + 5f) * _hookCdScale;
                     g.hookOut = true;
                     var origin = g.t.position + Vector3.up * 1.9f;
                     var hdir = (tp + Vector3.up * 1f - origin).normalized;
@@ -1886,6 +1949,30 @@ namespace Virus.World
                 _hud?.Toast("КРИТИЧЕСКИЙ СБОЙ: ты — БАГ. Ползи к порталу!");
             }
             else _hud?.Toast($"ЛОВУШКА СИСТЕМЫ! HP −{dmg} ({S.myHp}/{S.myMaxHp})");
+        }
+
+        // данк: свободный лут, оказавшийся в зоне выноса (брошенный/уроненный),
+        // засчитывается сам; влетевший на скорости — «трёхочковый» +15%
+        void TickPadIntake()
+        {
+            for (int i = 0; i < _loot.Count; i++)
+            {
+                var l = _loot[i];
+                if (l.deposited || l.carried || l.carrier != 0 || l.body == null) continue;
+                if (Vector3.Distance(l.body.position, PadPos) > PadRadius + 0.4f) continue;
+                bool dunk = l.rb != null && !l.rb.isKinematic && l.rb.linearVelocity.magnitude > 4f;
+                l.deposited = true;
+                float got = S.DepositValue(l.value * (dunk ? 1.15f : 1f));
+                Destroy(l.body.gameObject);
+                if (_coop)
+                    Net.NetManager.Send(NetSync.MsgLootDeposit(_netScene, i, S.access));
+                string combo = S.ComboCount > 1 ? $"  КОМБО ×{S.ComboMult:0.0}" : "";
+                Sfx.Play(dunk ? "win" : "deposit", dunk ? 0.4f : 0.4f);
+                _hud?.Toast(dunk
+                    ? $"ТРЁХОЧКОВЫЙ! ◈ +{(int)got} (+15% за бросок){combo}"
+                    : $"◈ +{(int)got} — в зоне выноса!{combo}");
+                if (!S.evacOpen && S.access >= 100f) OpenEvac(false);
+            }
         }
 
         void TickCarryAndDeposit()

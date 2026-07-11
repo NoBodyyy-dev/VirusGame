@@ -126,6 +126,46 @@ namespace Virus.EditorTools
             GraphicsSettings.defaultRenderPipeline = rp;
             QualitySettings.renderPipeline = rp;
 
+            // материал частиц: мягкая светящаяся точка (аддитивная прозрачность),
+            // настраиваем идемпотентно при каждой сборке
+            var partShader = Shader.Find("Universal Render Pipeline/Particles/Unlit");
+            if (partShader != null)
+            {
+                var dotTex = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Resources/tex_softdot.asset");
+                if (dotTex == null)
+                {
+                    const int N = 64;
+                    dotTex = new Texture2D(N, N, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
+                    var px = new Color[N * N];
+                    for (int y = 0; y < N; y++)
+                        for (int x = 0; x < N; x++)
+                        {
+                            float d = Vector2.Distance(new Vector2(x + 0.5f, y + 0.5f), new Vector2(N / 2f, N / 2f)) / (N / 2f);
+                            float a = Mathf.Clamp01(1f - d);
+                            px[y * N + x] = new Color(1f, 1f, 1f, a * a);
+                        }
+                    dotTex.SetPixels(px);
+                    dotTex.Apply();
+                    AssetDatabase.CreateAsset(dotTex, "Assets/Resources/tex_softdot.asset");
+                }
+                var pm = AssetDatabase.LoadAssetAtPath<Material>("Assets/Resources/mat_particles.mat");
+                if (pm == null)
+                {
+                    pm = new Material(partShader);
+                    AssetDatabase.CreateAsset(pm, "Assets/Resources/mat_particles.mat");
+                }
+                pm.shader = partShader;
+                pm.SetOverrideTag("RenderType", "Transparent");
+                pm.SetFloat("_Surface", 1f);   // transparent
+                pm.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                pm.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.One);   // аддитив: неоновое свечение
+                pm.SetFloat("_ZWrite", 0f);
+                pm.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                pm.SetTexture("_BaseMap", dotTex);
+                pm.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+                EditorUtility.SetDirty(pm);
+            }
+
             var lit = Shader.Find("Universal Render Pipeline/Lit");
             if (lit != null)
             {
