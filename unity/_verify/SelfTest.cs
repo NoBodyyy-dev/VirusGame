@@ -192,6 +192,45 @@ static class SelfTest
         Check(restored.gridNodes[2].failed, "сейв: проваленные узлы");
         Check(restored.Flag("mote:5"), "сейв: мот не возродится");
 
+        // ── архетипы серверов: правило узла из сида, детерминированно ──
+        foreach (var n in s.gridNodes)
+        {
+            if (n.zone == 0)
+                Check(n.arch == "", $"обучение без архетипов (узел {n.id})");
+            else if (n.arch != "")
+            {
+                Check(GameData.ARCHETYPES.ContainsKey(n.arch), $"архетип узла {n.id} известен");
+                Check(n.tier >= GameData.ARCHETYPES[n.arch].minTier, $"архетип узла {n.id} по тиру");
+                Check(n.arch == GameData.ArchForNode(n.seed, n.zone, n.tier), $"архетип узла {n.id} из сида");
+            }
+        }
+        {
+            // ресид по чужому сиду (кооп-клиент) даёт те же архетипы, что у хоста
+            var archHost = new GameState(); archHost.NewCampaign();
+            var archClient = new GameState(); archClient.NewCampaign();
+            archClient.ReseedCampaign(archHost.campaignSeed);
+            bool archMatch = true, anyArch = false;
+            for (int i = 0; i < archHost.gridNodes.Count; i++)
+            {
+                if (archHost.gridNodes[i].arch != archClient.gridNodes[i].arch) archMatch = false;
+                if (archHost.gridNodes[i].arch != "") anyArch = true;
+            }
+            Check(archMatch, "кооп: архетипы совпадают после ресида");
+            Check(anyArch, "хотя бы один узел с архетипом");
+            // архетип попадает в конфиг рейда; карантин лаборатории ужимает числа
+            var probe = new GameState(); probe.NewCampaign();
+            ServerNode avNode = null;
+            foreach (var n in probe.gridNodes) if (n.arch == "avlab") { avNode = n; break; }
+            if (avNode != null)
+            {
+                var baseTier = GameData.TIERS[avNode.tier];
+                probe.StartHack(avNode);
+                Check(probe.raid.arch == "avlab", "архетип в конфиге рейда");
+                Check(probe.raid.trapInterval > baseTier.trapInterval, "карантин: ловушки реже");
+                Check(probe.raid.camRange > baseTier.camRange, "карантин: датчики зорче");
+            }
+        }
+
         // ── кооп-скейлинг: стая из 4 делает рейд жирнее и злее ──
         var t0 = GameData.TIERS[0];
         s.packSize = 4;
@@ -204,6 +243,7 @@ static class SelfTest
         foreach (var n in s.gridNodes) if (n.tier == 2 && !n.infected) { tier2 = n; break; }
         s.StartHack(tier2);
         Check(s.raid.safes >= 1, "тир 2: сейф на месте");
+        Check(s.raid.hot >= 1, "тир 2: горячий пакет в хранилище");
         Check(s.raid.sensitivity == Math.Min(GameData.TIERS[2].sensitivity + 1, 4), "стая 4: больше роботов");
         s.packSize = 1;
         s.StartHack(s.gridNodes[0]);

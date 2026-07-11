@@ -55,7 +55,9 @@ namespace Virus.World
                 it.onInteract = () =>
                 {
                     if (def.power && !S.Stage3Powered()) return;
-                    UI.PuzzleUI.Open(def.diff, "СХЕМА ВЗЛОМА ДВЕРИ", () => OpenDoor(key));
+                    // тип взлома стабилен для двери: у каждой — свой характер
+                    UI.PuzzleUI.Open(UI.PuzzleUI.KindFor("door:" + key), def.diff,
+                        "СХЕМА ВЗЛОМА ДВЕРИ", () => OpenDoor(key));
                 };
             }
         }

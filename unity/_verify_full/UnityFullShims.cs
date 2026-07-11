@@ -160,13 +160,14 @@ namespace UnityEngine
         public GameObject gameObject = new();
         public Transform transform => gameObject.transform;
         public T GetComponent<T>() where T : Component => gameObject.GetComponent<T>();
+        public T GetComponentInChildren<T>() where T : Component => default;
         public string tag { get => gameObject.tag; set => gameObject.tag = value; }
     }
 
     public class Transform : Component, IEnumerable
     {
         public Vector3 position, localPosition, localScale = Vector3.one;
-        public Vector3 eulerAngles;
+        public Vector3 eulerAngles, localEulerAngles;
         public Quaternion rotation = Quaternion.identity, localRotation = Quaternion.identity;
         public Vector3 forward = Vector3.forward, right = Vector3.right;
         public Vector3 up { get; set; } = Vector3.up;
@@ -200,12 +201,18 @@ namespace UnityEngine
     public class RequireComponent : Attribute { public RequireComponent(Type t) { } }
 
     // ── рендер/сцена ──
+    public struct Ray
+    {
+        public Vector3 origin, direction;
+    }
+
     public class Camera : Behaviour
     {
         public static Camera main => null;
         public float fieldOfView, nearClipPlane, farClipPlane;
         public Color backgroundColor;
         public CameraClearFlags clearFlags;
+        public Ray ScreenPointToRay(Vector3 screen) => default;
     }
     public enum CameraClearFlags { Skybox, SolidColor, Depth, Nothing }
 
@@ -337,6 +344,12 @@ namespace UnityEngine
     public class MeshRenderer : Renderer { }
 
     public class Collider : Component { public bool isTrigger; public bool enabled = true; }
+
+    public class Collision
+    {
+        public Vector3 relativeVelocity;
+        public Collider collider;
+    }
     public class BoxCollider : Collider { public Vector3 size, center; }
     public class SphereCollider : Collider { public float radius; }
 

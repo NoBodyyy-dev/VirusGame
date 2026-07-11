@@ -9,6 +9,7 @@ namespace Virus.Core
         public int id, zone, tier, seed;
         public Vector3 pos;
         public string door, room, name, av;
+        public string arch = "";     // архетип: правило-твист узла (из сида)
         public bool infected, failed;
     }
 
@@ -71,9 +72,10 @@ namespace Virus.Core
         // ── состояние взлома (рейда) ──
         public class RaidConfig
         {
-            public string name, theme, av;
+            public string name, theme, av, arch;
             public int tier, quota, files, crates, sensitivity, seed;
             public int safes;           // сейфы (вес 3): T2+ — поднимать вдвоём
+            public int hot;             // горячие пакеты: греются в руках — эстафета
             public float trapInterval, camRange, creep;
             public int assist;          // вспомогательный взлом: заражённые серверы зоны
             public float assistK;       // их суммарная помощь (0..~0.35)
@@ -296,7 +298,11 @@ namespace Virus.Core
             if (seed == campaignSeed) return;
             campaignSeed = seed;
             var rng = new System.Random(seed);
-            foreach (var n in gridNodes) n.seed = rng.Next();
+            foreach (var n in gridNodes)
+            {
+                n.seed = rng.Next();
+                n.arch = GameData.ArchForNode(n.seed, n.zone, n.tier);
+            }
         }
 
         void GenerateGrid()
@@ -310,10 +316,12 @@ namespace Virus.Core
             foreach (var s in GameData.SERVERS)
             {
                 counts[s.zone]++;
+                int nodeSeed = rng.Next();
                 gridNodes.Add(new ServerNode {
                     id = id, zone = s.zone, tier = s.tier, pos = s.pos, door = s.door, room = s.room,
                     name = $"{GameData.StagePrefix(s.zone)}-{id:D2}",
-                    av = GameData.TIERS[s.tier].av, infected = false, failed = false, seed = rng.Next(),
+                    av = GameData.TIERS[s.tier].av, infected = false, failed = false, seed = nodeSeed,
+                    arch = GameData.ArchForNode(nodeSeed, s.zone, s.tier),
                 });
                 id++;
             }
@@ -437,10 +445,12 @@ namespace Virus.Core
             int extra = Math.Max(packSize - 1, 0);
             raid = new RaidConfig {
                 name = n.name, tier = n.tier, theme = t.theme, av = n.av,
+                arch = n.arch ?? "",
                 quota = (int)(t.quota * (1f + 0.4f * extra)),
                 files = t.files + extra,
                 crates = t.crates + extra / 2,
                 safes = n.tier >= 2 ? 1 + extra / 3 : 0,
+                hot = n.tier >= 2 ? n.tier - 1 + extra / 4 : 0,
                 sensitivity = Math.Min(t.sensitivity + extra / 2, 4),
                 trapInterval = t.trapInterval * (1f + assistK) / (1f + 0.15f * extra),
                 camRange = t.camRange,
@@ -448,6 +458,14 @@ namespace Virus.Core
                 seed = n.seed,
                 assist = assist, assistK = assistK,
             };
+            // КАРАНТИН лаборатории АВ: ловушек меньше, но датчики зорче и
+            // фоновая тревога мягче — весь риск переезжает в стелс
+            if (raid.arch == "avlab")
+            {
+                raid.trapInterval *= 1.7f;
+                raid.camRange *= 1.35f;
+                raid.creep *= 0.8f;
+            }
         }
 
         // ── тревога (не падает сама!) и фазы: SLEEP/SCAN/PURGE/WIPE ──

@@ -7,14 +7,26 @@ using Virus.Util;
 
 namespace Virus.UI
 {
-    // Порт puzzle_ui.gd: «СХЕМА ВЗЛОМА» — на сетке 4×4 вспыхивает маршрут,
-    // повтори его в том же порядке. Ошибка — новый маршрут, попыток сколько угодно.
+    // Роутер головоломок взлома + «СХЕМА ВЗЛОМА» (Саймон): на сетке 4×4
+    // вспыхивает маршрут, повтори его в том же порядке. Остальные типы пула —
+    // в Puzzles.cs (pipes/code/wires); флаг IsOpen общий для всех.
     public class PuzzleUI : MonoBehaviour
     {
         const int N = 4;
         const float ShowStep = 0.5f;
 
         public static bool IsOpen { get; private set; }
+        internal static void MarkOpen(bool v) => IsOpen = v;
+
+        // пул типов взлома; тип двери стабилен (по ключу), Оракул циклится
+        public static readonly string[] KINDS = { "trace", "pipes", "code", "wires" };
+
+        public static string KindFor(string key)
+        {
+            int h = 0;
+            foreach (var ch in key ?? "") h = h * 31 + ch;   // детерминированный хеш
+            return KINDS[((h % KINDS.Length) + KINDS.Length) % KINDS.Length];
+        }
 
         int _difficulty;
         Action _onSolved;
@@ -27,9 +39,19 @@ namespace Virus.UI
         GameObject _root;
         Player.VirusPlayer _player;
 
-        public static void Open(int difficulty, string title, Action onSolved)
+        // без явного типа — случайный из пула: каждый взлом ощущается иначе
+        public static void Open(int difficulty, string title, Action onSolved) =>
+            Open(KINDS[UnityEngine.Random.Range(0, KINDS.Length)], difficulty, title, onSolved);
+
+        public static void Open(string kind, int difficulty, string title, Action onSolved)
         {
             if (IsOpen) return;
+            switch (kind)
+            {
+                case "pipes": PipesPuzzle.Spawn(difficulty, title, onSolved); return;
+                case "code": CodeLockPuzzle.Spawn(difficulty, title, onSolved); return;
+                case "wires": WiresPuzzle.Spawn(difficulty, title, onSolved); return;
+            }
             var go = new GameObject("PuzzleUI");
             var p = go.AddComponent<PuzzleUI>();
             p._difficulty = Mathf.Clamp(difficulty, 1, 5);

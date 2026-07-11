@@ -15,7 +15,9 @@ namespace Virus.World
     // за Bandwidth, полевые задачи, HP/баг, эвакуация по квоте, результаты.
     public class Level : MonoBehaviour
     {
-        static readonly Vector3 PadPos = new(-27, 0, 0);
+        // зона выноса: у архетипа «зеркальный прокси» переезжает по залу
+        Vector3 _padPos = new(-27, 0, 0);
+        Vector3 PadPos => _padPos;
         const float PadRadius = 3.6f;
         const float HookSpeed = 11.5f, HookReturn = 14f, HookRange = 32f;
 
@@ -29,6 +31,14 @@ namespace Virus.World
         {
             public Transform body; public Rigidbody rb; public float value; public int weight;
             public bool carried, deposited; public GameObject beacon;
+            public bool fake;            // почтовый узел: спам-пустышка (внос = тревога)
+            public bool fragile;         // хрупкий: жёсткие удары режут цену, потом бьётся
+            public float value0;         // цена на спавне (порог «разбился»)
+            public float lastHitT;
+            public bool hot;             // горячий пакет: греется в руках — эстафета [F]
+            public float heat;
+            public bool hotWarned;
+            public Material mat;         // эмиссия горячего: жёлтый → алый
             public int carrier;          // кооп: id носильщика (0 — свободен)
             public Vector3 netPos;       // кооп: позиция от чужого носильщика
             public bool hasNet;
@@ -79,6 +89,24 @@ namespace Virus.World
         string _mutatorDesc = "";
         int _goldIndex = -1;
         float _hookAlarmGate = 50f, _hookCdScale = 1f, _chaseSpeed = 6f;
+
+        // ── архетип сервера: постоянное ПРАВИЛО узла (сеется от сида кампании) ──
+        string _arch = "";
+        readonly List<Transform> _beams = new();     // bank: лазерная гребёнка
+        readonly List<float> _beamDir = new();
+        float _beamHitLock;
+        Transform _portalRoot;                       // proxy: портал-мигрант
+        int _padIdx;
+        float _padSwitchT;
+        bool _padWarned;
+        float _darkT;                                // dark: цикл затемнения
+        int _darkPhase;                              // 0 свет · 1 мерцание · 2 тьма
+        Color _ambSky0, _ambEq0, _ambGnd0;
+        float _fogDensity0;
+        float _scanT;                                // scan: проверка целостности
+        int _scanPhase;                              // 0 тихо · 1 отсчёт · 2 скан
+        bool _scanBusted;
+        Material _scanMat;
 
         float _trapTimer, _hitLock, _reviveT;
         int _phaseSeen;
@@ -155,7 +183,11 @@ namespace Virus.World
         void RollMutator()
         {
             if (S.raid.tier == 0 || _rng.NextDouble() < 0.35) return;   // часть рейдов «чистые»
-            switch (_rng.Next(5))
+            int roll = _rng.Next(5);
+            // конфликт с архетипом: игровой сервер сам про гравитацию,
+            // почтовый сам про «лишний» лут — мутатор уступает правилу узла
+            if ((_arch == "game" && roll == 1) || (_arch == "mail" && roll == 3)) return;
+            switch (roll)
             {
                 case 0:
                     _mutator = "gold";
@@ -190,6 +222,7 @@ namespace Virus.World
         {
             if (_mutator == "lowgrav") _player.gravityScale = 0.5f;
             if (_mutator == "slippery") _player.accelScale = 0.32f;
+            if (_arch == "game") _player.gravityScale = 0.62f;   // чит-гравитация сервера
         }
 
         void Start()
@@ -199,9 +232,17 @@ namespace Virus.World
                 if (S.gridNodes.Count == 0) S.NewCampaign();
                 S.StartHack(S.gridNodes[0]);
             }
+            // тестовые крюки смоук-рана (боевой запуск их не передаёт):
+            // -arch <имя> навязывает архетип, -hot подкладывает горячие пакеты
+            var bootArgs = System.Environment.GetCommandLineArgs();
+            int archAt = System.Array.IndexOf(bootArgs, "-arch");
+            if (archAt >= 0 && archAt + 1 < bootArgs.Length && GameData.ARCHETYPES.ContainsKey(bootArgs[archAt + 1]))
+                S.raid.arch = bootArgs[archAt + 1];
+            if (System.Array.IndexOf(bootArgs, "-hot") >= 0 && S.raid.hot == 0) S.raid.hot = 2;
             Current = this;
             _netScene = "raid:" + (S.currentNode?.id ?? -1);
             _rng = new System.Random(S.raid.seed);
+            _arch = S.raid.arch ?? "";
             _hallW = 70f + (float)_rng.NextDouble() * 18f;
             _hallD = 46f + (float)_rng.NextDouble() * 14f;
             _accent = GameData.TIER_COLORS[S.raid.tier];
@@ -216,6 +257,7 @@ namespace Virus.World
             SpawnGuards();
             SpawnFieldTasks();
             BuildJamConsole();
+            BuildArchetype();
             SpawnPlayer();
             ApplyPlayerMutator();
 
@@ -226,16 +268,20 @@ namespace Virus.World
                 _hud.Toast($"{S.raid.name} · {GameData.TIERS[S.raid.tier].name} · выносим лут и тихо!");
                 if (S.raid.assist > 0)
                     _hud.Toast($"ВСПОМОГАТЕЛЬНЫЙ ВЗЛОМ: {S.raid.assist} серверов зоны помогают (−{(int)(S.raid.assistK * 100)}% защиты)");
+                string archLine = _arch != "" ? $"{GameData.ARCHETYPES[_arch].twist} · " : "";
                 if (_mutator != "")
-                    _hud.SetObjective($"МУТАТОР: {_mutatorDesc} · тащи лут в зону выноса");
+                    _hud.SetObjective($"{archLine}МУТАТОР: {_mutatorDesc} · лут в зону выноса");
                 else
-                    _hud.SetObjective("Тащи лут в круг у портала — набери 100% квоты");
+                    _hud.SetObjective($"{archLine}Тащи лут в круг у портала — 100% квоты");
+                if (_arch != "")
+                    _hud.Toast($"{GameData.ARCHETYPES[_arch].name} — {GameData.ARCHETYPES[_arch].twist}");
+                if (S.raid.hot > 0)
+                    _hud.Toast("ГОРЯЧИЕ ПАКЕТЫ в хранилище: греются в руках — сбрасывай или перекидывай [F] по цепочке!");
             }
             // атмосфера: мотыльки данных по залу, вихрь над зоной выноса,
             // отражения неона на полу (probe вместо тяжёлого SSR)
             Fx.DataMotes(transform, new Vector3(0, 3f, 0), new Vector3(_hallW - 6f, 5.5f, _hallD - 6f),
                 _accent, 45f);
-            Fx.PortalSwirl(transform, PadPos + Vector3.up * 0.2f, GameData.INFECTED);
             Fx.ReflectionProbe(transform, new Vector3(0, 3.4f, 0), new Vector3(_hallW, 8f, _hallD));
 
             _ambience = Sfx.Ambient("hum", 0.22f);   // гул серверной, густеет с тревогой
@@ -416,7 +462,8 @@ namespace Virus.World
             txt.color = GameData.INFECTED;
             txt.horizontalOverflow = HorizontalWrapMode.Overflow;
             txt.rectTransform.sizeDelta = new Vector2(1200, 60);
-            txt.text = $">> инъекция в {S.raid.name} · обход {S.raid.av}…";
+            string archName = _arch != "" ? GameData.ARCHETYPES[_arch].name + " · " : "";
+            txt.text = $">> инъекция в {S.raid.name} · {archName}обход {S.raid.av}…";
 
             float t = 0f;
             while (t < 1.4f)
@@ -448,6 +495,11 @@ namespace Virus.World
             RenderSettings.fogMode = FogMode.Exponential;
             RenderSettings.fogDensity = 0.0015f;
             RenderSettings.skybox = null;
+            // база для архетипа «свет гаснет»: к чему возвращаться после тьмы
+            _ambSky0 = RenderSettings.ambientSkyColor;
+            _ambEq0 = RenderSettings.ambientEquatorColor;
+            _ambGnd0 = RenderSettings.ambientGroundColor;
+            _fogDensity0 = RenderSettings.fogDensity;
 
             var moon = new GameObject("Fill").AddComponent<Light>();
             moon.type = LightType.Directional;
@@ -762,65 +814,77 @@ namespace Virus.World
 
         void BuildPortal()
         {
+            // весь портал живёт под _portalRoot: архетип «прокси» двигает его
+            // целиком одним сдвигом корня (корень в нуле — локальные == мировые)
+            _portalRoot = new GameObject("portal").transform;
+            _portalRoot.SetParent(transform, false);
+            var pr = _portalRoot;
             // приглушённая площадка: тёмная плита, неоновая РАМКА по краю и малый центр
-            Build.MeshBox(transform, new Vector3(PadRadius * 2, 0.1f, PadRadius * 2), Mats.Plastic(new Color(0.05f, 0.1f, 0.09f)), PadPos + Vector3.up * 0.05f);
+            Build.MeshBox(pr, new Vector3(PadRadius * 2, 0.1f, PadRadius * 2), Mats.Plastic(new Color(0.05f, 0.1f, 0.09f)), PadPos + Vector3.up * 0.05f);
             float inR = PadRadius * 2 - 0.5f;
             foreach (int s in new[] { -1, 1 })
             {
-                Build.MeshBox(transform, new Vector3(inR, 0.04f, 0.18f), Mats.Neon(GameData.INFECTED, 1.1f), PadPos + new Vector3(0, 0.11f, s * (inR * 0.5f - 0.09f)));
-                Build.MeshBox(transform, new Vector3(0.18f, 0.04f, inR), Mats.Neon(GameData.INFECTED, 1.1f), PadPos + new Vector3(s * (inR * 0.5f - 0.09f), 0.11f, 0));
+                Build.MeshBox(pr, new Vector3(inR, 0.04f, 0.18f), Mats.Neon(GameData.INFECTED, 1.1f), PadPos + new Vector3(0, 0.11f, s * (inR * 0.5f - 0.09f)));
+                Build.MeshBox(pr, new Vector3(0.18f, 0.04f, inR), Mats.Neon(GameData.INFECTED, 1.1f), PadPos + new Vector3(s * (inR * 0.5f - 0.09f), 0.11f, 0));
             }
-            Build.MeshBox(transform, new Vector3(1.4f, 0.05f, 1.4f), Mats.Neon(GameData.INFECTED, 1.4f), PadPos + Vector3.up * 0.12f);
+            Build.MeshBox(pr, new Vector3(1.4f, 0.05f, 1.4f), Mats.Neon(GameData.INFECTED, 1.4f), PadPos + Vector3.up * 0.12f);
             // hazard-рамка по периметру зоны выноса
             float b = PadRadius + 0.55f;
-            Build.MeshBox(transform, new Vector3(b * 2, 0.06f, 0.35f), Mats.Hazard(), PadPos + new Vector3(0, 0.04f, -b));
-            Build.MeshBox(transform, new Vector3(b * 2, 0.06f, 0.35f), Mats.Hazard(), PadPos + new Vector3(0, 0.04f, b));
-            Build.MeshBox(transform, new Vector3(0.35f, 0.06f, b * 2), Mats.Hazard(), PadPos + new Vector3(-b, 0.04f, 0));
-            Build.MeshBox(transform, new Vector3(0.35f, 0.06f, b * 2), Mats.Hazard(), PadPos + new Vector3(b, 0.04f, 0));
-            Build.Omni(transform, PadPos + Vector3.up * 2f, new Color(0.1f, 0.8f, 0.9f), 1.6f, 8f);
+            Build.MeshBox(pr, new Vector3(b * 2, 0.06f, 0.35f), Mats.Hazard(), PadPos + new Vector3(0, 0.04f, -b));
+            Build.MeshBox(pr, new Vector3(b * 2, 0.06f, 0.35f), Mats.Hazard(), PadPos + new Vector3(0, 0.04f, b));
+            Build.MeshBox(pr, new Vector3(0.35f, 0.06f, b * 2), Mats.Hazard(), PadPos + new Vector3(-b, 0.04f, 0));
+            Build.MeshBox(pr, new Vector3(0.35f, 0.06f, b * 2), Mats.Hazard(), PadPos + new Vector3(b, 0.04f, 0));
+            Build.Omni(pr, PadPos + Vector3.up * 2f, new Color(0.1f, 0.8f, 0.9f), 1.6f, 8f);
             // вместо летающего текста — круглые колонны-маяки по углам
             for (int sx = -1; sx <= 1; sx += 2)
                 for (int sz = -1; sz <= 1; sz += 2)
                 {
                     var cp = PadPos + new Vector3(sx * b, 0, sz * b);
-                    Build.Prim(PrimitiveType.Cylinder, transform, new Vector3(0.24f, 1.3f, 0.24f),
+                    Build.Prim(PrimitiveType.Cylinder, pr, new Vector3(0.24f, 1.3f, 0.24f),
                         Mats.MetalDark(0.5f), cp + Vector3.up * 1.3f, collide: true);
-                    Build.Prim(PrimitiveType.Sphere, transform, Vector3.one * 0.32f,
+                    Build.Prim(PrimitiveType.Sphere, pr, Vector3.one * 0.32f,
                         Mats.Neon(GameData.INFECTED, 2.4f), cp + Vector3.up * 2.75f);
                 }
             for (int i = 0; i < 3; i++)
             {
                 var ch = PadPos + new Vector3(PadRadius + 1.6f + i * 1.1f, 0.03f, 0);
-                var a1 = Build.MeshBox(transform, new Vector3(1.1f, 0.05f, 0.22f), Mats.Neon(GameData.INFECTED, 1.4f - i * 0.3f), ch + new Vector3(0, 0, 0.38f));
+                var a1 = Build.MeshBox(pr, new Vector3(1.1f, 0.05f, 0.22f), Mats.Neon(GameData.INFECTED, 1.4f - i * 0.3f), ch + new Vector3(0, 0, 0.38f));
                 a1.transform.localRotation = Quaternion.Euler(0, 45, 0);
-                var a2 = Build.MeshBox(transform, new Vector3(1.1f, 0.05f, 0.22f), Mats.Neon(GameData.INFECTED, 1.4f - i * 0.3f), ch + new Vector3(0, 0, -0.38f));
+                var a2 = Build.MeshBox(pr, new Vector3(1.1f, 0.05f, 0.22f), Mats.Neon(GameData.INFECTED, 1.4f - i * 0.3f), ch + new Vector3(0, 0, -0.38f));
                 a2.transform.localRotation = Quaternion.Euler(0, -45, 0);
             }
+            Fx.PortalSwirl(pr, PadPos + Vector3.up * 0.2f, GameData.INFECTED);
         }
 
         void SpawnLoot()
         {
             float hx = _hallW * 0.5f, hz = _hallD * 0.5f;
-            int files = S.raid.files, crates = S.raid.crates, safes = S.raid.safes;
-            for (int i = 0; i < files + crates + safes; i++)
+            int files = S.raid.files, crates = S.raid.crates, safes = S.raid.safes, hotN = S.raid.hot;
+            for (int i = 0; i < files + crates + safes + hotN; i++)
             {
-                bool safe = i >= files + crates;   // сейф (вес 3): T2+, только вдвоём
-                bool crate = !safe && i >= files;
+                bool hot = i >= files + crates + safes;   // греется в руках — эстафета
+                bool safe = !hot && i >= files + crates;  // сейф (вес 3): T2+, только вдвоём
+                bool crate = !hot && !safe && i >= files;
                 var pos = new Vector3(R(-hx + 8, hx - 5), 1f, R(-hz + 4, hz - 4));
                 if (pos.x < -14) pos.x = -pos.x;   // не спавним в зоне выноса
-                var go = new GameObject(safe ? "safe" : crate ? "crate" : "file");
+                var go = new GameObject(hot ? "hot" : safe ? "safe" : crate ? "crate" : "file");
                 go.transform.SetParent(transform, false);
                 go.transform.position = pos;
                 var col = go.AddComponent<BoxCollider>();
-                col.size = safe ? new Vector3(1.35f, 1.15f, 1.1f)
+                col.size = hot ? new Vector3(0.62f, 0.58f, 0.5f)
+                    : safe ? new Vector3(1.35f, 1.15f, 1.1f)
                     : crate ? new Vector3(1.05f, 0.85f, 0.9f) : new Vector3(0.55f, 0.5f, 0.42f);
                 var rb = go.AddComponent<Rigidbody>();
-                rb.mass = safe ? 20 : crate ? 8 : 4;
-                var c = safe ? new Color(1f, 0.72f, 0.2f)
+                rb.mass = hot ? 4 : safe ? 20 : crate ? 8 : 4;
+                var c = hot ? new Color(1f, 0.5f, 0.15f)
+                    : safe ? new Color(1f, 0.72f, 0.2f)
                     : crate ? new Color(0.29f, 0.56f, 1f) : new Color(0.22f, 0.94f, 0.66f);
-                float value = safe ? R(34, 46) : crate ? R(16, 24) : R(7, 11);
+                float value = hot ? R(30, 42) : safe ? R(34, 46) : crate ? R(16, 24) : R(7, 11);
+                // хрупкий лут (T1+): дороже, но бьётся от ударов — не швырять!
+                bool fragile = !hot && !safe && S.raid.tier >= 1 && _rng.NextDouble() < 0.26;
+                if (fragile) value *= 1.4f;
                 // мутатор ЖИРНЫЙ КУШ: один золотой файл ×3, светится издалека
-                bool golden = _mutator == "gold" && i == _goldIndex && !crate && !safe;
+                bool golden = _mutator == "gold" && i == _goldIndex && !crate && !safe && !hot;
                 if (golden)
                 {
                     value *= 3f;
@@ -828,6 +892,7 @@ namespace Virus.World
                     go.transform.localScale = Vector3.one * 1.3f;
                     Build.Omni(go.transform, Vector3.up * 0.6f, c, 1.8f, 7f);
                 }
+                Material hotMat = null;
                 if (safe)
                 {
                     // бронированный корпус + светящаяся скважина и полосы
@@ -836,17 +901,100 @@ namespace Virus.World
                     Build.MeshBox(go.transform, new Vector3(col.size.x + 0.04f, 0.16f, col.size.z + 0.04f), Mats.Hazard(), new Vector3(0, -0.32f, 0));
                     Build.MeshBox(go.transform, Vector3.one * 0.18f, Mats.Neon(c, 2.6f), new Vector3(0, 0.05f, -col.size.z * 0.5f - 0.02f));
                 }
+                else if (hot)
+                {
+                    // тёмный кожух с раскалённым ядром: цвет ядра = шкала нагрева
+                    Build.MeshBox(go.transform, col.size, Mats.MetalDark(0.5f), Vector3.zero);
+                    hotMat = Mats.Neon(c, 1.6f);
+                    Build.MeshBox(go.transform, col.size * 0.62f, hotMat, Vector3.zero);
+                    Build.Omni(go.transform, Vector3.up * 0.4f, c, 1.1f, 4f);
+                }
                 else
+                {
                     Build.MeshBox(go.transform, col.size, Mats.Neon(c, golden ? 2.2f : 0.9f), Vector3.zero);
-                var loot = new Loot { body = go.transform, rb = rb, value = value, weight = safe ? 3 : crate ? 2 : 1 };
+                    if (fragile)   // стеклянный ореол: хрупкость видно издалека
+                        Build.MeshBox(go.transform, col.size * 1.18f, Mats.Holo(new Color(0.8f, 0.95f, 1f), 0.5f), Vector3.zero);
+                }
+                var loot = new Loot
+                {
+                    body = go.transform, rb = rb, value = value, value0 = value,
+                    weight = safe ? 3 : crate ? 2 : 1,
+                    fragile = fragile, hot = hot, mat = hotMat,
+                };
                 _loot.Add(loot);
+                if (fragile)
+                    go.AddComponent<FragileWatch>().onImpact = v => OnFragileImpact(loot, v);
 
                 var it = go.AddComponent<Interactable>();
                 it.radius = 2.7f;
+                bool maskVal = _arch == "mail" && !safe && !crate && !hot;   // почта прячет ценники
+                it.dynamicPrompt = () =>
+                {
+                    if (_carried != null) return "[E] положить · [F] швырнуть";
+                    if (loot.carrier != 0) return "лут у напарника";
+                    string val = maskVal ? "◈ ??" : $"◈ {(int)loot.value}";
+                    if (hot) return $"[E] ГОРЯЧИЙ ПАКЕТ ({val} · греется в руках!)";
+                    if (safe) return $"[E] СЕЙФ ({val} · поднимать вдвоём)";
+                    return $"[E] схватить лут ({val}{(crate ? " · тяжёлый" : "")}{(loot.fragile ? " · ХРУПКИЙ" : "")})";
+                };
+                it.enabledFn = () => !loot.deposited &&
+                    (_carried == loot || (_carried == null && loot.carrier == 0));
+                it.onInteract = () => ToggleCarry(loot);
+            }
+            if (_arch == "mail") SpawnSpam();
+        }
+
+        // хрупкий лут ударился (свободный полёт после броска/падения):
+        // цена тает, на трети от исходной — вдребезги и тревога
+        void OnFragileImpact(Loot l, float speed)
+        {
+            if (_done || l.deposited || l.carried || l.carrier != 0) return;
+            if (speed < 7.5f || Time.time - l.lastHitT < 0.4f) return;
+            l.lastHitT = Time.time;
+            l.value *= 0.72f;
+            Sfx.Play("trap", 0.25f);
+            if (l.value <= l.value0 * 0.35f)
+            {
+                l.deposited = true;   // осколки не подобрать
+                AlarmEvent(8f);
+                _flashCol = new Color(1f, 0.5f, 0.6f);
+                _flashA = 0.3f;
+                _hud?.Toast("ХРУПКИЙ ФАЙЛ РАЗБИТ! Осколки подняли тревогу (+8)");
+                int idx = _loot.IndexOf(l);
+                if (l.body != null) Destroy(l.body.gameObject);
+                if (_coop && idx >= 0)
+                    Net.NetManager.Send(NetSync.MsgLootGone(_netScene, idx));
+            }
+            else _hud?.Toast($"Хрупкий файл повреждён: цена упала до ◈{(int)l.value}");
+        }
+
+        // спам-шторм: пустышки выглядят как файлы, но внос — тревога +6.
+        // Выдаёт их глитч-мерцание (TickLootPulse); spyware метит их красным.
+        void SpawnSpam()
+        {
+            float hx = _hallW * 0.5f, hz = _hallD * 0.5f;
+            int fakes = Mathf.Max(2, S.raid.files / 2);
+            var fileCol = new Color(0.22f, 0.94f, 0.66f);
+            for (int i = 0; i < fakes; i++)
+            {
+                var pos = new Vector3(R(-hx + 8, hx - 5), 1f, R(-hz + 4, hz - 4));
+                if (pos.x < -14) pos.x = -pos.x;
+                var go = new GameObject("file");   // имя как у настоящего — не подсматривать
+                go.transform.SetParent(transform, false);
+                go.transform.position = pos;
+                var col = go.AddComponent<BoxCollider>();
+                col.size = new Vector3(0.55f, 0.5f, 0.42f);
+                var rb = go.AddComponent<Rigidbody>();
+                rb.mass = 4;
+                Build.MeshBox(go.transform, col.size, Mats.Neon(fileCol, 0.9f), Vector3.zero);
+                if (S.HasPassive("spyware"))
+                    Build.Omni(go.transform, Vector3.up * 0.5f, new Color(1f, 0.25f, 0.2f), 1.2f, 3.5f);
+                var loot = new Loot { body = go.transform, rb = rb, value = 0f, weight = 1, fake = true };
+                _loot.Add(loot);
+                var it = go.AddComponent<Interactable>();
+                it.radius = 2.7f;
                 it.dynamicPrompt = () => _carried == null
-                    ? (loot.carrier != 0 ? "лут у напарника"
-                        : safe ? $"[E] СЕЙФ (◈ {(int)value} · поднимать вдвоём)"
-                        : $"[E] схватить лут (◈ {(int)value}{(crate ? " · тяжёлый" : "")})")
+                    ? (loot.carrier != 0 ? "лут у напарника" : "[E] схватить лут (◈ ??)")
                     : "[E] положить · [F] швырнуть";
                 it.enabledFn = () => !loot.deposited &&
                     (_carried == loot || (_carried == null && loot.carrier == 0));
@@ -881,19 +1029,28 @@ namespace Virus.World
             return false;
         }
 
-        // ── консоль глушения: роль «оператора» в большой стае ──
-        // Пока кто-то стоит у консоли и держит E — фоновый рост тревоги гасится
-        // (события всё равно её поднимают). Оператор занят: не носит, не воюет.
+        // ── ТЕРМИНАЛ ОПЕРАТОРА: асимметричная роль для стаи ──
+        // Сев за консоль, игрок получает тактический вид сверху: видит роботов
+        // и лут, ставит пинг-метки [ЛКМ], жмёт стоп-кадр системы [R] и глушит
+        // фоновый рост тревоги. Сам не носит и уязвим — вся сила в голосе.
         Transform _jamConsole;
         Material _jamScreenMat;
         readonly Color _jamCol = new(0.25f, 0.9f, 1f);
         float _jamFlushT, _jamAccum;
         bool _jamming;
+        bool _opMode;
+        Camera _opCam;
+        Camera _playerCam;
+        float _opFreezeCd;
+        readonly List<GameObject> _opMarks = new();
+        GameObject _opCanvas;
+        UnityEngine.UI.Text _opHint;
 
         void BuildJamConsole()
         {
+            if (_arch == "avlab") return;   // КАРАНТИН: терминал изолирован — чистый стелс
             float hz = _hallD * 0.5f;
-            var root = new GameObject("jam_console").transform;
+            var root = new GameObject("op_console").transform;
             root.SetParent(transform, false);
             root.localPosition = new Vector3(-2.5f, 0, -hz + 1.6f);
             Build.Solid(root, new Vector3(1.6f, 1.15f, 0.8f), Mats.MetalDark(0.45f), new Vector3(0, 0.58f, 0));
@@ -904,19 +1061,149 @@ namespace Virus.World
             _jamConsole = root;
             var it = root.gameObject.AddComponent<Interactable>();
             it.radius = 2.6f;
-            it.dynamicPrompt = () => _jamming
-                ? "ГЛУШЕНИЕ АКТИВНО: фоновая тревога заморожена"
-                : "[E·держать] КОНСОЛЬ ГЛУШЕНИЯ: пока держишь — тревога не растёт";
-            it.enabledFn = () => !S.myBug;
+            it.dynamicPrompt = () =>
+                "[E] ТЕРМИНАЛ ОПЕРАТОРА: вид сверху · пинг · стоп-кадр · глушение фона";
+            it.enabledFn = () => !S.myBug && !_opMode && _carried == null;
+            it.onInteract = EnterOperator;
         }
 
+        float _opEnterT;   // защита от выхода тем же нажатием E, что вошло
+
+        void EnterOperator()
+        {
+            if (_opMode || S.myBug || _done) return;
+            _opMode = true;
+            _opEnterT = Time.time;
+            _player.controlEnabled = false;
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+            _playerCam = _player.GetComponentInChildren<Camera>();
+            if (_playerCam != null) _playerCam.enabled = false;
+            var camGo = new GameObject("OpCam", typeof(Camera));
+            _opCam = camGo.GetComponent<Camera>();
+            _opCam.fieldOfView = 60f;
+            _opCam.nearClipPlane = 0.3f;
+            _opCam.farClipPlane = 300f;
+            camGo.transform.position = new Vector3(0, 52f, -8f);
+            camGo.transform.rotation = Quaternion.Euler(80f, 0, 0);
+            PostFx.AttachCamera(_opCam);
+            // маркеры над роботами: с высоты их видно даже за стойками
+            foreach (var g in _guards)
+            {
+                var mark = Build.MeshBox(g.t, new Vector3(0.9f, 0.25f, 0.9f),
+                    Mats.Neon(new Color(1f, 0.25f, 0.2f), 3f), new Vector3(0, 7.5f, 0));
+                _opMarks.Add(mark);
+            }
+            // подсказка управления
+            _opCanvas = new GameObject("OpCanvas", typeof(Canvas), typeof(CanvasScaler));
+            var cv = _opCanvas.GetComponent<Canvas>();
+            cv.renderMode = RenderMode.ScreenSpaceOverlay;
+            cv.sortingOrder = 35;
+            _opCanvas.GetComponent<CanvasScaler>().uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+            _opCanvas.GetComponent<CanvasScaler>().referenceResolution = new Vector2(1600, 900);
+            var txtGo = new GameObject("hint", typeof(RectTransform));
+            txtGo.transform.SetParent(_opCanvas.transform, false);
+            _opHint = txtGo.AddComponent<Text>();
+            _opHint.font = Build.UIFont;
+            _opHint.fontSize = 20;
+            _opHint.alignment = TextAnchor.MiddleCenter;
+            _opHint.color = new Color(0.75f, 0.92f, 1f);
+            _opHint.horizontalOverflow = HorizontalWrapMode.Overflow;
+            var hintRt = _opHint.rectTransform;
+            hintRt.anchorMin = new Vector2(0.5f, 0); hintRt.anchorMax = new Vector2(0.5f, 0);
+            hintRt.anchoredPosition = new Vector2(0, 40);
+            hintRt.sizeDelta = new Vector2(1400, 40);
+            Sfx.Play("ui", 0.3f);
+            _hud?.Toast("РЕЖИМ ОПЕРАТОРА: ты — глаза стаи. Говори, куда идти!");
+            if (_jamScreenMat != null) _jamScreenMat.SetColor("_EmissionColor", _jamCol * 2.8f);
+        }
+
+        void ExitOperator()
+        {
+            if (!_opMode) return;
+            _opMode = false;
+            if (_opCam != null) Destroy(_opCam.gameObject);
+            foreach (var m in _opMarks) if (m != null) Destroy(m);
+            _opMarks.Clear();
+            if (_opCanvas != null) Destroy(_opCanvas);
+            if (_playerCam != null) _playerCam.enabled = true;
+            if (!_done)
+            {
+                _player.controlEnabled = true;
+                Cursor.lockState = CursorLockMode.Locked;
+                Cursor.visible = false;
+            }
+            if (_jamScreenMat != null) _jamScreenMat.SetColor("_EmissionColor", _jamCol * 0.7f);
+        }
+
+        void TickOperator(float dt)
+        {
+            _opFreezeCd = Mathf.Max(_opFreezeCd - dt, 0f);
+            if (!_opMode) return;
+            if (S.myBug || (Input.GetKeyDown(KeyCode.E) && Time.time > _opEnterT + 0.25f))
+            {
+                ExitOperator();
+                return;
+            }
+            if (_opHint != null)
+                _opHint.text = "[ЛКМ] пинг-метка стае   ·   [R] СТОП-КАДР системы " +
+                    (_opFreezeCd > 0f ? $"(перезарядка {(int)_opFreezeCd}с)" : "(готов)") +
+                    "   ·   [E] встать";
+            // пинг: клик по полу — световой столб, виден всей стае
+            if (Input.GetMouseButtonDown(0) && _opCam != null)
+            {
+                var ray = _opCam.ScreenPointToRay(Input.mousePosition);
+                if (ray.direction.y < -0.05f)
+                {
+                    float t = -ray.origin.y / ray.direction.y;
+                    var pos = ray.origin + ray.direction * t;
+                    SpawnPing(pos, true);
+                }
+            }
+            // стоп-кадр: замораживает систему всем на 4с
+            if (Input.GetKeyDown(KeyCode.R) && _opFreezeCd <= 0f)
+            {
+                _opFreezeCd = 25f;
+                ApplyOpFreeze(true);
+            }
+        }
+
+        void SpawnPing(Vector3 pos, bool mine)
+        {
+            pos.y = 0;
+            var ping = new GameObject("ping");
+            ping.transform.SetParent(transform, false);
+            ping.transform.position = pos;
+            var col = new Color(0.3f, 0.95f, 1f);
+            Build.Prim(PrimitiveType.Cylinder, ping.transform, new Vector3(0.5f, 7f, 0.5f),
+                Mats.Holo(col, 0.65f), Vector3.up * 7f);
+            Build.Prim(PrimitiveType.Sphere, ping.transform, Vector3.one * 1.1f,
+                Mats.Neon(col, 2.6f), Vector3.up * 0.6f);
+            Build.Omni(ping.transform, Vector3.up * 1.5f, col, 1.6f, 9f);
+            Destroy(ping, 6f);
+            Sfx.Play("ui", 0.25f);
+            if (mine && _coop)
+                Net.NetManager.Send(NetSync.MsgOpPing(_netScene, pos.x, pos.z));
+            if (!mine) _hud?.Toast("ОПЕРАТОР: метка на поле — туда!");
+        }
+
+        void ApplyOpFreeze(bool mine)
+        {
+            _frozenUntil = Mathf.Max(_frozenUntil, Time.time + 4f);
+            _flashCol = new Color(0.3f, 0.9f, 1f);
+            _flashA = 0.25f;
+            Sfx.Play("ability", 0.4f);
+            _hud?.Toast(mine ? "СТОП-КАДР: система заморожена на 4с!"
+                             : "ОПЕРАТОР дал СТОП-КАДР: система замерла (4с)!");
+            if (mine && _coop)
+                Net.NetManager.Send(NetSync.MsgOpFreeze(_netScene));
+        }
+
+        // глушение фона: работает, пока оператор сидит за терминалом
         void TickJam(float dt)
         {
             bool was = _jamming;
-            _jamming = _jamConsole != null && !S.myBug && !Frozen
-                && !UI.PuzzleUI.IsOpen && !UI.EvolutionUI.IsOpen
-                && Input.GetKey(KeyCode.E)
-                && Vector3.Distance(_player.transform.position, _jamConsole.position) < 2.6f;
+            _jamming = _opMode && !S.myBug && !Frozen;
             if (_jamming)   // компенсируем фоновый creep с небольшим запасом
                 _jamAccum -= S.raid.creep * (S.evacOpen ? 1.6f : 1f) * dt * 1.1f;
             if (_jamming != was && _jamScreenMat != null)
@@ -929,6 +1216,219 @@ namespace Virus.World
             }
         }
 
+
+        // ── АРХЕТИПЫ СЕРВЕРОВ: у каждого узла своё правило игры ──────────────
+        void BuildArchetype()
+        {
+            switch (_arch)
+            {
+                case "bank":
+                {
+                    // две лазерные гребёнки ходят по залу поперёк — перепрыгиваемые
+                    var beamCol = new Color(1f, 0.25f, 0.3f);
+                    for (int i = 0; i < 2; i++)
+                    {
+                        var beam = Build.MeshBox(transform, new Vector3(0.16f, 1.05f, _hallD - 2f),
+                            Mats.Neon(beamCol, 2.6f),
+                            new Vector3(i == 0 ? -_hallW * 0.25f : _hallW * 0.25f, 0.55f, 0));
+                        Build.Omni(beam.transform, Vector3.zero, beamCol, 1.2f, 6f);
+                        _beams.Add(beam.transform);
+                        _beamDir.Add(i == 0 ? 1f : -1f);
+                    }
+                    break;
+                }
+                case "game":
+                {
+                    // чит-гравитация + парящие платформы: лучшие файлы наверху
+                    var files = new List<Loot>();
+                    foreach (var l in _loot) if (l.weight == 1 && !l.fake) files.Add(l);
+                    float hx = _hallW * 0.5f, hz = _hallD * 0.5f;
+                    for (int i = 0; i < 4; i++)
+                    {
+                        var pos = new Vector3(R(-hx + 12, hx - 8), R(2.2f, 2.9f), R(-hz + 7, hz - 7));
+                        if (pos.x < -12) pos.x = -pos.x;
+                        Build.Solid(transform, new Vector3(5.2f, 0.5f, 4.2f),
+                            Mats.Metal(new Color(0.35f, 0.5f, 0.6f), 0.5f), pos);
+                        Build.MeshBox(transform, new Vector3(5.4f, 0.08f, 4.4f),
+                            Mats.Neon(new Color(0.5f, 0.9f, 1f), 1.4f), pos + Vector3.up * 0.3f);
+                        Loot best = null;
+                        foreach (var l in files)
+                            if (best == null || l.value > best.value) best = l;
+                        if (best != null)
+                        {
+                            best.body.position = pos + Vector3.up * 1.2f;
+                            files.Remove(best);
+                        }
+                    }
+                    break;
+                }
+                case "scan":
+                    // потолочная балка сканера через весь зал: греется перед проверкой
+                    _scanMat = Mats.Neon(new Color(1f, 0.6f, 0.3f), 0.8f);
+                    Build.MeshBox(transform, new Vector3(_hallW - 4f, 0.35f, 0.8f), _scanMat,
+                        new Vector3(0, 6.4f, 0));
+                    _scanT = 14f;
+                    break;
+                case "dark":
+                    _darkT = 15f;
+                    break;
+                case "proxy":
+                    _padSwitchT = 38f;
+                    break;
+            }
+        }
+
+        void TickArchetype(float dt)
+        {
+            switch (_arch)
+            {
+                case "bank": TickBeams(dt); break;
+                case "dark": TickDark(dt); break;
+                case "scan": TickScan(dt); break;
+                case "proxy": TickProxy(dt); break;
+            }
+        }
+
+        // платёжный шлюз: лучи ходят по залу, бьют стоящих на полу — прыгай
+        void TickBeams(float dt)
+        {
+            _beamHitLock = Mathf.Max(_beamHitLock - dt, 0f);
+            if (Frozen) return;   // «шифрование» замораживает и гребёнку
+            float hx = _hallW * 0.5f - 2f;
+            float speed = 4.6f + S.raid.tier * 0.5f;
+            for (int i = 0; i < _beams.Count; i++)
+            {
+                var b = _beams[i];
+                float x = b.position.x + _beamDir[i] * speed * dt;
+                if (x > hx) { x = hx; _beamDir[i] = -1f; }
+                else if (x < -hx) { x = -hx; _beamDir[i] = 1f; }
+                b.position = new Vector3(x, b.position.y, 0);
+                var pp = _player.transform.position;
+                if (_beamHitLock <= 0f && !S.myBug && pp.y < 1.15f && Mathf.Abs(pp.x - x) < 0.5f)
+                {
+                    _beamHitLock = 1.2f;
+                    HurtPlayer(new Vector3(x, 1f, pp.z), 1);
+                    _hud?.Toast("ЛАЗЕРНАЯ ГРЕБЁНКА: перепрыгивай лучи!");
+                }
+            }
+        }
+
+        // умный дом: свет гаснет циклами — запоминай зал, пока светло
+        void TickDark(float dt)
+        {
+            _darkT -= dt;
+            switch (_darkPhase)
+            {
+                case 0:
+                    if (_darkT <= 0f)
+                    {
+                        _darkPhase = 1; _darkT = 3f;
+                        _hud?.Toast("УМНЫЙ ДОМ: свет гаснет через 3с — запомни, где лут!");
+                        Sfx.Play("alarm", 0.25f);
+                    }
+                    break;
+                case 1:
+                    float fl = 0.35f + Mathf.PerlinNoise(Time.time * 9f, 0.5f) * 0.65f;
+                    RenderSettings.ambientSkyColor = _ambSky0 * fl;
+                    RenderSettings.ambientEquatorColor = _ambEq0 * fl;
+                    RenderSettings.ambientGroundColor = _ambGnd0 * fl;
+                    if (_darkT <= 0f)
+                    {
+                        _darkPhase = 2; _darkT = 8f;
+                        RenderSettings.ambientSkyColor = _ambSky0 * 0.05f;
+                        RenderSettings.ambientEquatorColor = _ambEq0 * 0.05f;
+                        RenderSettings.ambientGroundColor = _ambGnd0 * 0.04f;
+                        RenderSettings.fogDensity = 0.02f;
+                    }
+                    break;
+                case 2:
+                    if (_darkT <= 0f)
+                    {
+                        _darkPhase = 0; _darkT = 17f + (float)_rng.NextDouble() * 6f;
+                        RenderSettings.ambientSkyColor = _ambSky0;
+                        RenderSettings.ambientEquatorColor = _ambEq0;
+                        RenderSettings.ambientGroundColor = _ambGnd0;
+                        RenderSettings.fogDensity = _fogDensity0;
+                        _hud?.Toast("Питание восстановлено");
+                    }
+                    break;
+            }
+        }
+
+        // архивный массив: периодический скан целостности — замри или маскируйся
+        void TickScan(float dt)
+        {
+            if (Frozen) return;   // заморозка системы останавливает и сканер
+            _scanT -= dt;
+            switch (_scanPhase)
+            {
+                case 0:
+                    if (_scanT <= 0f)
+                    {
+                        _scanPhase = 1; _scanT = 3f; _scanBusted = false;
+                        _hud?.Toast("ПРОВЕРКА ЦЕЛОСТНОСТИ через 3с: ЗАМРИ или маскируйся!");
+                        Sfx.Play("alarm", 0.3f);
+                        _scanMat?.SetColor("_EmissionColor", new Color(1f, 0.6f, 0.3f) * 3f);
+                    }
+                    break;
+                case 1:
+                    if (_scanT <= 0f)
+                    {
+                        _scanPhase = 2; _scanT = 2.6f;
+                        _scanMat?.SetColor("_EmissionColor", new Color(1f, 0.2f, 0.15f) * 4f);
+                    }
+                    break;
+                case 2:
+                    if (!_scanBusted && !S.myBug && !PlayerHidden && _player.PlanarSpeed > 0.8f)
+                    {
+                        _scanBusted = true;
+                        AlarmEvent(12f);
+                        SpawnTrap();
+                        _flashCol = new Color(1f, 0.3f, 0.2f);
+                        _flashA = 0.35f;
+                        Sfx.Play("trap", 0.4f);
+                        _hud?.Toast("СКАН ЗАСЁК ДВИЖЕНИЕ: тревога +12!");
+                    }
+                    if (_scanT <= 0f)
+                    {
+                        _scanPhase = 0; _scanT = 16f + (float)_rng.NextDouble() * 8f;
+                        _scanMat?.SetColor("_EmissionColor", new Color(1f, 0.6f, 0.3f) * 0.8f);
+                        if (!_scanBusted) _hud?.Toast("Проверка пройдена — чисто");
+                    }
+                    break;
+            }
+        }
+
+        // зеркальный прокси: зона выноса мигрирует запад↔восток.
+        // В коопе миграцию решает директор, остальные получают её через RAS.
+        void TickProxy(float dt)
+        {
+            if (_coop && !_director) return;
+            _padSwitchT -= dt;
+            if (_padSwitchT <= 5f && !_padWarned)
+            {
+                _padWarned = true;
+                _hud?.Toast("ПРОКСИ: порт мигрирует через 5 секунд!");
+                Sfx.Play("alarm", 0.25f);
+            }
+            if (_padSwitchT <= 0f)
+            {
+                _padSwitchT = 38f;
+                _padWarned = false;
+                SetPadIndex(_padIdx ^ 1);
+            }
+        }
+
+        void SetPadIndex(int idx)
+        {
+            if (idx == _padIdx || _portalRoot == null) return;
+            _padIdx = idx;
+            var target = idx == 0 ? new Vector3(-27, 0, 0) : new Vector3(27, 0, 0);
+            _portalRoot.position += target - _padPos;
+            _padPos = target;
+            Sfx.Play("hook", 0.4f);
+            _hud?.Toast("ПОРТ ПЕРЕЕХАЛ: новая зона выноса " + (idx == 0 ? "на западе" : "на востоке"));
+        }
 
         static void SetLayerDeep(Transform t, int layer)
         {
@@ -1060,10 +1560,12 @@ namespace Virus.World
 
         void TaskDone(string msg)
         {
-            AlarmEvent(-8f);
+            // в карантине лаборатории системе доверия меньше: скидка вдвое слабее
+            float bonus = _arch == "avlab" ? -4f : -8f;
+            AlarmEvent(bonus);
             S.CareerEvent("tasks");
             Sfx.Play("win", 0.3f);
-            _hud?.Toast(msg + " · тревога −8, карьера +1 задача");
+            _hud?.Toast($"{msg} · тревога {(int)bonus}, карьера +1 задача");
         }
 
         void SpawnConsoleTask()
@@ -1254,6 +1756,9 @@ namespace Virus.World
             TickAbilities();
             TickThrow();
             TickJam(dt);
+            TickOperator(dt);
+            TickArchetype(dt);
+            TickHeat(dt);
             TickCarryAndDeposit();
             TickPadIntake();
             TickBugAndRevive(dt);
@@ -1272,6 +1777,7 @@ namespace Virus.World
             if (UI.PuzzleUI.IsOpen || UI.EvolutionUI.IsOpen || UI.PauseMenu.IsOpen) return;
             var l = _carried;
             DropLoot();
+            if (l.hot) l.heat = Mathf.Max(l.heat - 25f, 0f);   // эстафета студит пакет
             var v = _player.LookDir() * 10f + Vector3.up * 4.5f;
             l.rb.linearVelocity = v;
             if (_coop)
@@ -1283,15 +1789,19 @@ namespace Virus.World
             Sfx.Play("ui", 0.3f);
         }
 
-        // лут рядом слегка «дышит» размером — легче заметить в темноте
+        // лут рядом слегка «дышит» размером — легче заметить в темноте.
+        // Спам-пустышки выдаёт рваное глитч-дрожание — внимательный заметит.
         void TickLootPulse()
         {
             var pp = _player.transform.position;
-            foreach (var l in _loot)
+            for (int i = 0; i < _loot.Count; i++)
             {
+                var l = _loot[i];
                 if (l.deposited || l.body == null || l.carried) continue;
                 bool near = Vector3.Distance(pp, l.body.position) < 5f;
                 float k = near ? 1f + 0.05f * Mathf.Sin(Time.time * 6f) : 1f;
+                if (l.fake && Mathf.PerlinNoise(Time.time * 2.6f, i * 7.13f) > 0.72f)
+                    k *= 1.14f;   // глитч спама: редкие рывки размера
                 l.body.localScale = Vector3.one * k;
             }
         }
@@ -1319,7 +1829,8 @@ namespace Virus.World
         // ── ловушки: типизированные снаряды из ближайшей стены ──
         void TickTraps(float dt)
         {
-            if (S.AlarmPhase() >= 1 && !S.myBug && !PlayerHidden)
+            // в темноте умного дома система «слепнет» — новые ловушки не летят
+            if (S.AlarmPhase() >= 1 && !S.myBug && !PlayerHidden && _darkPhase != 2)
             {
                 float speedup = 1f + S.alarm / 100f + S.raid.tier * 0.25f;
                 if (Time.time < _markedUntil) speedup *= 1.6f;   // метка: система ведёт тебя
@@ -1579,6 +2090,7 @@ namespace Virus.World
                     h.caught = true;
                     h.ret = true;
                     DropLoot();
+                    if (_opMode) ExitOperator();   // крюк выдёргивает оператора
                     _hookedUntil = Time.time + 1.6f;
                     _hookedBy = h.owner;
                     _player.Shake(0.6f);
@@ -1656,7 +2168,7 @@ namespace Virus.World
                 {
                     _netStateTimer = 0.5f;
                     Net.NetManager.Send(NetSync.MsgRaidState(_netScene, S.alarm, S.evacOpen,
-                        S.evacLeft, S.wipeForced, DepositedMask(), S.access));
+                        S.evacLeft, S.wipeForced, DepositedMask(), S.access, _padIdx));
                 }
             }
 
@@ -1809,6 +2321,21 @@ namespace Virus.World
                         if (!S.evacOpen && S.access >= 100f) OpenEvac(false);
                     }
                     break;
+                case "RLG":   // лут пропал: спам сгорел в фильтре / хрупкий разбился
+                    if (int.TryParse(p[2], out var gi2) && gi2 >= 0 && gi2 < _loot.Count)
+                    {
+                        MarkDepositedRemote(_loot[gi2]);
+                        Sfx.Play("trap", 0.2f);
+                    }
+                    break;
+                case "ROP":   // пинг оператора: столб света для всей стаи
+                    if (p.Length >= 4 && NetSync.ParseF(p[2], out var px)
+                        && NetSync.ParseF(p[3], out var pz))
+                        SpawnPing(new Vector3(px, 0, pz), false);
+                    break;
+                case "ROF":   // стоп-кадр оператора: система замерла у всех
+                    ApplyOpFreeze(false);
+                    break;
             }
         }
 
@@ -1833,6 +2360,8 @@ namespace Virus.World
                 for (int i = 0; i < _loot.Count && i < 31; i++)
                     if ((mask & (1 << i)) != 0) MarkDepositedRemote(_loot[i]);
             if (NetSync.ParseF(p[7], out var acc)) S.access = Mathf.Max(S.access, acc);
+            // прокси: не-директор двигает зону выноса вслед за директором
+            if (p.Length >= 9 && int.TryParse(p[8], out var padIdx)) SetPadIndex(padIdx);
         }
 
         void ApplyLootCarry(Loot l, int pid)
@@ -1907,6 +2436,7 @@ namespace Virus.World
                     h.caught = true;
                     Net.NetManager.Send(NetSync.MsgHookCaught(_netScene, kv.Key));
                     DropLoot();
+                    if (_opMode) ExitOperator();   // крюк выдёргивает оператора
                     _hookedUntil = Time.time + 1.6f;
                     _hookedBy = h.owner;
                     _player.Shake(0.6f);
@@ -1919,6 +2449,7 @@ namespace Virus.World
         void TickAbilities()
         {
             if (UI.PuzzleUI.IsOpen || UI.EvolutionUI.IsOpen || UI.PauseMenu.IsOpen) return;
+            if (_opMode) return;   // за терминалом клавиши — операторские
             if (Input.GetKeyDown(KeyCode.Q)) UseAbility(0);
             if (Input.GetKeyDown(KeyCode.X)) UseAbility(1);
             if (Input.GetKeyDown(KeyCode.C)) UseAbility(2);
@@ -2052,6 +2583,7 @@ namespace Virus.World
         void HurtPlayer(Vector3 from, int dmg)
         {
             if (_hitLock > 0f || S.myBug || _done) return;
+            if (_opMode) ExitOperator();   // оператора выбило из терминала
             _hitLock = 1.2f;
             S.myHp = Mathf.Max(S.myHp - dmg, 0);
             // rootkit бесшумный: система слышит удар вдвое тише
@@ -2072,6 +2604,70 @@ namespace Virus.World
             else _hud?.Toast($"ЛОВУШКА СИСТЕМЫ! HP −{dmg} ({S.myHp}/{S.myMaxHp})");
         }
 
+        // спам-пустышка попала в портал: система заметила мусор
+        void SpamBusted(Loot l, int idx)
+        {
+            AlarmEvent(6f);
+            Sfx.Play("trap", 0.35f);
+            _flashCol = new Color(1f, 0.75f, 0.2f);
+            _flashA = 0.3f;
+            _hud?.Toast("СПАМ-ПУСТЫШКА! Фильтр заметил мусор: тревога +6");
+            if (l.body != null) Destroy(l.body.gameObject);
+            if (_coop && idx >= 0)
+                Net.NetManager.Send(NetSync.MsgLootGone(_netScene, idx));
+        }
+
+        // ── горячие пакеты: греются в руках, стынут на полу; бросок [F]
+        // сбрасывает четверть шкалы — конвейер из рук в руки быстрее ходок ──
+        float _hotBeepT;
+
+        void TickHeat(float dt)
+        {
+            foreach (var l in _loot)
+            {
+                if (!l.hot || l.deposited || l.body == null) continue;
+                if (_carried == l)
+                {
+                    l.heat += dt * 13f;
+                    if (l.heat >= 60f && !l.hotWarned)
+                    {
+                        l.hotWarned = true;
+                        _hud?.Toast("ПАКЕТ РАСКАЛЯЕТСЯ: перекинь [F] напарнику или положи остыть!");
+                    }
+                    if (l.heat < 40f) l.hotWarned = false;
+                    // писк учащается с нагревом
+                    _hotBeepT -= dt;
+                    if (_hotBeepT <= 0f)
+                    {
+                        _hotBeepT = Mathf.Lerp(1.1f, 0.22f, Mathf.Clamp01(l.heat / 100f));
+                        Sfx.Play("ui", 0.16f);
+                    }
+                    if (l.heat >= 100f) Overheat(l);
+                }
+                else if (l.carrier == 0)
+                    l.heat = Mathf.Max(l.heat - dt * 22f, 0f);
+                if (l.mat != null)
+                {
+                    float k = Mathf.Clamp01(l.heat / 100f);
+                    var c = new Color(1f, 0.5f - 0.42f * k, 0.15f - 0.1f * k);
+                    l.mat.SetColor("_EmissionColor", c * (1.4f + k * 2.4f));
+                }
+            }
+        }
+
+        void Overheat(Loot l)
+        {
+            l.heat = 55f;          // остаётся горячим — не поднять и бежать дальше
+            l.hotWarned = false;
+            l.value *= 0.85f;
+            AlarmEvent(7f);
+            DropLoot();
+            _flashCol = new Color(1f, 0.4f, 0.1f);
+            _flashA = 0.35f;
+            Sfx.Play("trap", 0.4f);
+            _hud?.Toast("ПАКЕТ ПЕРЕГРЕЛСЯ: выпал (−15% цены, тревога +7). Работайте цепочкой [F]!");
+        }
+
         // данк: свободный лут, оказавшийся в зоне выноса (брошенный/уроненный),
         // засчитывается сам; влетевший на скорости — «трёхочковый» +15%
         void TickPadIntake()
@@ -2083,6 +2679,7 @@ namespace Virus.World
                 if (Vector3.Distance(l.body.position, PadPos) > PadRadius + 0.4f) continue;
                 bool dunk = l.rb != null && !l.rb.isKinematic && l.rb.linearVelocity.magnitude > 4f;
                 l.deposited = true;
+                if (l.fake) { SpamBusted(l, i); continue; }
                 if (dunk) S.lastDunks++;
                 float got = S.DepositValue(l.value * (dunk ? 1.15f : 1f));
                 Destroy(l.body.gameObject);
@@ -2117,6 +2714,7 @@ namespace Virus.World
                     var l = _carried;
                     DropLoot();
                     l.deposited = true;
+                    if (l.fake) { SpamBusted(l, _loot.IndexOf(l)); return; }
                     float got = S.DepositValue(l.value);
                     Destroy(l.body.gameObject);
                     if (_coop)
@@ -2183,6 +2781,7 @@ namespace Virus.World
         {
             if (_done) return;
             _done = true;
+            ExitOperator();   // вернуть камеру игроку до экрана результатов
             Sfx.Play(victory ? "win" : "fail", 0.5f);
             S.FinishHack(victory);
             App.SaveSystem.Save();   // прогресс кампании переживает закрытие игры
@@ -2245,5 +2844,12 @@ namespace Virus.World
             t.rectTransform.anchoredPosition = pos;
             t.rectTransform.sizeDelta = new Vector2(1000, 60);
         }
+    }
+
+    // сторож хрупкого лута: физика сообщает о жёстких ударах корпуса
+    public class FragileWatch : MonoBehaviour
+    {
+        public System.Action<float> onImpact;
+        void OnCollisionEnter(Collision c) => onImpact?.Invoke(c.relativeVelocity.magnitude);
     }
 }

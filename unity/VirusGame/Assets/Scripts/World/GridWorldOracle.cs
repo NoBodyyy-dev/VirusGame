@@ -92,7 +92,11 @@ namespace Virus.World
                 var it = MakeInteract(root, new Vector3(0, 1, 0), 2.8f);
                 it.prompt = $"[E] ГОЛОВОЛОМКА ОРАКУЛА {num}/15";
                 it.enabledFn = () => !S.Flag(pd.key);
-                it.onInteract = () => UI.PuzzleUI.Open(pd.diff, "ГОЛОВОЛОМКА ОРАКУЛА", () =>
+                // 15 пилонов циклятся по всему пулу — финал показывает всё разнообразие
+                int kindIdx = int.TryParse(num, out var pn) ? pn : 0;
+                it.onInteract = () => UI.PuzzleUI.Open(
+                    UI.PuzzleUI.KINDS[kindIdx % UI.PuzzleUI.KINDS.Length],
+                    pd.diff, "ГОЛОВОЛОМКА ОРАКУЛА", () =>
                 {
                     S.SetFlag(pd.key);
                     screen.GetComponent<MeshRenderer>().sharedMaterial = Mats.Neon(GameData.INFECTED, 1.3f);

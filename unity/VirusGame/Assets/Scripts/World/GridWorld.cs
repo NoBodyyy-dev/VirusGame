@@ -276,7 +276,9 @@ namespace Virus.World
                     var it = MakeInteract(root, new Vector3(0, 1, 0), 4.2f);
                     var node = n;
                     it.dynamicPrompt = () => S.NodeUnlocked(node)
-                        ? $"[E] ВЗЛОМ СЕРВЕРА: {node.name} ({GameData.TIERS[node.tier].shortName} · {node.av})"
+                        ? $"[E] ВЗЛОМ СЕРВЕРА: {node.name} ({GameData.TIERS[node.tier].shortName}" +
+                          (node.arch != "" ? $" · {GameData.ARCHETYPES[node.arch].name}" : "") +
+                          $" · {node.av})"
                         : $"ЗАПЕРТО: {S.NodeLockReason(node)}";
                     it.onInteract = () =>
                     {

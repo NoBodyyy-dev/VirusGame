@@ -69,6 +69,15 @@ namespace Virus.Core
         public Color color;
     }
 
+    // архетип сервера: уникальное ПРАВИЛО узла (не числа!) — лечит «все рейды
+    // одинаковые». Назначается детерминированно от сида узла: в коопе совпадает.
+    public class ArchetypeInfo
+    {
+        public string name, twist;   // имя для Грида и твист-подсказка для рейда
+        public Color color;
+        public int minTier;          // с какого тира встречается
+    }
+
     public static class GameData
     {
         // ── классы: "base" — общий старт, остальные — ветки дерева ──
@@ -172,6 +181,46 @@ namespace Virus.Core
             ["mark"]    = new TrapInfo { name = "МЕТКА", tier = 2, speed = 7f, life = 10f, color = new Color(1f, 0.85f, 0.3f) },
             ["reflash"] = new TrapInfo { name = "ПАТРОН С ПЕРЕПРОШИВКОЙ", tier = 3, speed = 5.5f, life = 14f, color = new Color(0.3f, 1f, 0.6f) },
         };
+
+        // ── архетипы серверов: у каждого узла своё правило игры ──
+        public static readonly Dictionary<string, ArchetypeInfo> ARCHETYPES = new()
+        {
+            ["mail"] = new ArchetypeInfo { name = "ПОЧТОВЫЙ УЗЕЛ", minTier = 0,
+                color = new Color(0.95f, 0.85f, 0.4f),
+                twist = "СПАМ-ШТОРМ: среди лута фальшивки — цену не видно, присмотрись к глитч-мерцанию" },
+            ["game"] = new ArchetypeInfo { name = "ИГРОВОЙ СЕРВЕР", minTier = 0,
+                color = new Color(0.5f, 0.9f, 1f),
+                twist = "ЧИТ-ГРАВИТАЦИЯ: прыжки выше, лучший лут на парящих платформах" },
+            ["dark"] = new ArchetypeInfo { name = "УЗЕЛ УМНОГО ДОМА", minTier = 0,
+                color = new Color(0.55f, 0.5f, 1f),
+                twist = "СВЕТ ГАСНЕТ: периодические отключения — запоминай зал, пока светло" },
+            ["proxy"] = new ArchetypeInfo { name = "ЗЕРКАЛЬНЫЙ ПРОКСИ", minTier = 1,
+                color = new Color(0.4f, 1f, 0.8f),
+                twist = "ПОРТ МИГРИРУЕТ: зона выноса периодически переезжает через зал" },
+            ["scan"] = new ArchetypeInfo { name = "АРХИВНЫЙ МАССИВ", minTier = 1,
+                color = new Color(1f, 0.6f, 0.3f),
+                twist = "ПРОВЕРКА ЦЕЛОСТНОСТИ: во время скана ЗАМРИ или замаскируйся" },
+            ["bank"] = new ArchetypeInfo { name = "ПЛАТЁЖНЫЙ ШЛЮЗ", minTier = 2,
+                color = new Color(1f, 0.35f, 0.4f),
+                twist = "ЛАЗЕРНАЯ ГРЕБЁНКА: лучи ходят по залу — перепрыгивай или страдай" },
+            ["avlab"] = new ArchetypeInfo { name = "ЛАБОРАТОРИЯ АНТИВИРУСА", minTier = 2,
+                color = new Color(0.8f, 0.4f, 1f),
+                twist = "КАРАНТИН: датчики зорче, глушение недоступно — чистый стелс" },
+        };
+
+        // архетип узла из его сида: детерминированно (кооп/сейв дают то же),
+        // зона 0 — обучение без сюрпризов, ~четверть узлов «чистые»
+        public static string ArchForNode(int seed, int zone, int tier)
+        {
+            if (zone == 0) return "";
+            var pool = new List<string>();
+            foreach (var kv in ARCHETYPES)
+                if (tier >= kv.Value.minTier) pool.Add(kv.Key);
+            pool.Sort(System.StringComparer.Ordinal);   // порядок словаря не гарантирован
+            uint h = (uint)seed;
+            if (h % 4 == 0) return "";
+            return pool[(int)(h / 4 % (uint)pool.Count)];
+        }
 
         // ── тиры узлов (T0 обучающий → T3 военные) ──
         public static readonly Tier[] TIERS =

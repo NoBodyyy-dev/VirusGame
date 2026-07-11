@@ -53,10 +53,11 @@ namespace Virus.Core
         // ── рейд-кооп: сообщения привязаны к сцене "raid:<node>" ──
         // Директор рейда (наименьший id в узле) владеет тревогой/роботами/крюками.
 
-        // состояние системы: тревога, эвакуация, маска внесённого лута, добыча
+        // состояние системы: тревога, эвакуация, маска внесённого лута, добыча,
+        // индекс площадки портала (архетип «зеркальный прокси» двигает зону выноса)
         public static string MsgRaidState(string scene, float alarm, bool evac, float evacLeft,
-            bool wipe, int depositedMask, float access) =>
-            $"RAS|{Clean(scene)}|{F(alarm)}|{(evac ? 1 : 0)}|{F(evacLeft)}|{(wipe ? 1 : 0)}|{depositedMask}|{F(access)}";
+            bool wipe, int depositedMask, float access, int padIdx = 0) =>
+            $"RAS|{Clean(scene)}|{F(alarm)}|{(evac ? 1 : 0)}|{F(evacLeft)}|{(wipe ? 1 : 0)}|{depositedMask}|{F(access)}|{padIdx}";
 
         // событийная поправка тревоги от не-директора (задача −8, глушилка −12…)
         public static string MsgAlarmDelta(string scene, float d) => $"RALD|{Clean(scene)}|{F(d)}";
@@ -84,6 +85,15 @@ namespace Virus.Core
 
         public static string MsgLootDeposit(string scene, int idx, float access) =>
             $"RLD|{Clean(scene)}|{idx}|{F(access)}";
+
+        // лут пропал без вноса: спам сгорел в фильтре / хрупкий файл разбился
+        public static string MsgLootGone(string scene, int idx) => $"RLG|{Clean(scene)}|{idx}";
+
+        // оператор за терминалом: пинг-метка стае и стоп-кадр системы
+        public static string MsgOpPing(string scene, float x, float z) =>
+            $"ROP|{Clean(scene)}|{F(x)}|{F(z)}";
+
+        public static string MsgOpFreeze(string scene) => $"ROF|{Clean(scene)}|0";
 
         public static string[] Parse(string line) => (line ?? "").TrimEnd('\r').Split('|');
 
